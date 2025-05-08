@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Framed Iframe Responsive Template</title>
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: #111; height: 100%; width: 100%; }
+    #container {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100vw;
+      height: 100vh;
+    }
+    #container canvas {
+      display: block;
+      background: #111;
+      /* Make the canvas a centered square with whitespace around it */
+      width: 90vw;
+      height: 70vmin;
+      max-width: 90vw;
+      max-height: 90vh;
+      min-width: 200px;
+      min-height: 200px;
+      margin: auto;
+      border-radius: 18px;
+    }
+    #contentFrame {
+      position: absolute;
+      border: none;
+      background: #fff;
+      transition: box-shadow 0.3s;
+      display: block;
+    }
+    #buttons {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 100;
+      display: none;
+    }
+    #fullscreen, #key {
+      background: #222;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      margin-left: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 16px;
+    }
+    #controls {
+      /* Controls overlay in the top-left of the square */
+      pointer-events: auto;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0,0,0,0.5);
+      padding: 10px 18px 10px 10px;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <canvas></canvas>
+    <div id="controls">
+      <label style="color:#fff;">Speed <input id="speedSlider" type="range" min="0.005" max="0.05" step="0.001" value="0.001"></label>
+      <span id="speedVal" style="color:#fff;">0.001</span>
+    </div>
+    <div id="weather-controls" style="position:absolute;top:60px;left:10px;z-index:11;background:rgba(0,0,0,0.5);padding:10px 18px 10px 10px;border-radius:8px;">
+      <label style="color:#fff;">City
+        <select id="citySelect">
+          <option value="new york">New York</option>
+          <option value="london">London</option>
+          <option value="tokyo">Tokyo</option>
+          <option value="paris">Paris</option>
+          <option value="sydney">Sydney</option>
+        </select>
+      </label>
+      <span id="weatherStatus" style="color:#fff;margin-left:10px;"></span>
+    </div>
+  </div>
+  <iframe id="contentFrame"></iframe>
+  <div id="buttons">
+    <button id="fullscreen">Fullscreen</button>
+    <a id="key" href="#" target="_blank" style="display:none;">External URL</a>
+  </div>
+  <script>
+    // Minimal config and randomizer for demo purposes
+    const config = {
+        extendedEasePower: 30,
+        masterSpeed: 0.001, // much slower by default
+        colorSyncPatterns: [
+            [[1],[2],[3]], // fill with your actual color sync logic as needed
+            [[0],[2],[3]],
+            [[0],[1],[3]],
+            [[0],[1],[2]]
+        ],
+        speedRange: [0.2, 1.2],
+        syncSpeed: false,
+        movementDir: 0,
+        initialLineRandomness: 0.2,
+        probabilityNoVerticalRepetition: 0.5,
+        noMonochromes: false
+    };
+    const rnd = {
+        range: ([min, max]) => min + Math.random() * (max - min),
+        bool: (p = 0.5) => Math.random() < p,
+        spread: (n, randomness, offset = 1, start = 0) => {
+            let arr = [];
+            for (let i = 0; i < n; i++) {
+                arr.push(start + (offset * i) / (n - 1) + (Math.random() - 0.5) * randomness);
+            }
+            return arr;
+        },
+        shuffle: arr => {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        },
+        pick: (arr, except=[]) => {
+            let pool = arr.filter(x => !except.includes(x));
+            return pool[Math.floor(Math.random() * pool.length)];
+        },
+        reset: () => {}
+    };
+
+    let canvas = document.querySelector('#container canvas');
+    /**@type {CanvasRenderingContext2D} */
+    let ctx = canvas.getContext("2d", { alpha: false });
+
+    let width, height;
+
+    let ease, masterSpeed, extensionFactor, size;
+
+    let colorMaps = [{}, {}, {}, {}];
+    let allowRepetition, layout, colors, sharedColorIdxs;
+    let values, diffs;
+
+    // Minimal randomize function for demo purposes
+    function randomize() {
+        return {
+            lines: 8 + Math.floor(Math.random() * 8), // 8-15 lines
+            colorMode: Math.floor(Math.random() * config.colorSyncPatterns.length),
+            allowRepetition: rnd.bool(),
+            layout: rnd.pick(["x", "diamond"]),
+            colors: [
+                "#ff6f2e", "#a13b8e", "#e94ca4", "#2bb67a", "#ffe156", "#06d6a0", "#ff7c43", "#2300d1"
+            ]
+        };
+    }
+
+    let generate = function() {
+        let features = randomize();
+        console.log(JSON.stringify(features));
+        let { lines, colorMode } = features;
+        let linesExt = Math.round(extensionFactor * lines);
+        if (lines != linesExt) {
+            console.log(`Extending number of lines for aspect ratio, from ${lines} to ${linesExt}`);
+        }
+
+        allowRepetition = features.allowRepetition;
+        layout = features.layout;
+        colors = features.colors;
+
+        sharedColorIdxs = config.colorSyncPatterns[colorMode];
+
+        // Fix: Ensure sharedColorIdxs is always an array of arrays for each quadrant
+        // If not, default to [[0],[1],[2],[3]]
+        if (!Array.isArray(sharedColorIdxs) || sharedColorIdxs.length !== 4) {
+            sharedColorIdxs = [[0],[1],[2],[3]];
+        }
+
+        const speedAll = rnd.range(config.speedRange);
+        values = [];
+        const addLine = (progress, id) => {
+            let speed = config.syncSpeed ? speedAll : rnd.range(config.speedRange);
+            speed *= config.movementDir == 0 ? (rnd.bool() ? 1 : -1) : config.movementDir;
+            values.push({ id, progress, speed });
+        }
+
+        const pSquare = 1 / extensionFactor;
+        const progresses = rnd.spread(lines + 1, config.initialLineRandomness, pSquare, 0);
+        progresses.shift();
+
+        for (let i = 0; i < lines; i++) {
+            addLine(progresses[i], "v" + i);
+        }
+
+        if (linesExt > lines) {
+            assignColors();
+            const progressesExt = rnd.spread(linesExt - lines, config.initialLineRandomness, 1 - pSquare).map(v => v + pSquare).sort((v1, v2) => v1 - v2);
+            for (let i = lines; i < linesExt; i++) {
+                addLine(progressesExt[i - lines], "v" + i);
+            }
+            const edgeKey = values[lines - 1].id + ".e";
+            const toKey = values[lines - 1].id + '.' + values[lines].id;
+            colorMaps.forEach(colorMap => {
+                colorMap[toKey] = colorMap[edgeKey];
+            });
+            assignColors();
+        }
+
+        diffs = [];
+        for (let i = 0; i < linesExt; i++) {
+            diffs[i] = [];
+        }
+    }
+
+    let updateRAF = function() {
+        draw();
+        requestAnimationFrame(updateRAF);
+    }
+
+    let update = function() {
+        masterSpeed = config.masterSpeed / extensionFactor; // Always use current config.masterSpeed
+        const nValues = values.length;
+        const step = .1;
+        for (let k = 0; k < 1; k += step) {
+            for (let i = 0; i < nValues - 1; i++) {
+                for (let j = i; j < nValues; j++) {
+                    diffs[i][j] = diff(values[j].progress, values[i].progress);
+                }
+            }
+            for (let idx = 0; idx < nValues; idx++) {
+                const p = values[idx];
+                const pre = p.progress;
+                p.progress = (p.progress + step * p.speed * masterSpeed + 1) % 1;
+                if (Math.abs(pre - p.progress) > .5) {
+                    const idN = values[(idx + 1) % nValues].id, idP = values[(idx - 1 + nValues) % nValues].id;
+                    if (p.progress > .5) {
+                        for (let j = 0; j < 4; j++) {
+                            colorMaps[j]["c." + idN] = colorMaps[j][p.id + "." + idN];
+                            colorMaps[j][idP + "." + p.id] = colorMaps[j][idP + ".e"];
+                        }
+                    } else {
+                        for (let j = 0; j < 4; j++) {
+                            colorMaps[j][idP + ".e"] = colorMaps[j][idP + "." + p.id];
+                            colorMaps[j][p.id + "." + idN] = colorMaps[j]["c." + idN];
+                        }
+                    }
+                }
+            };
+            toSwap.length = 0;
+            for (let i = 0; i < nValues - 1; i++) {
+                for (let j = i; j < nValues; j++) {
+                    const d = diff(values[j].progress, values[i].progress) - diffs[i][j];
+                    if (Math.abs(d) > .5) {
+                        toSwap.push([values[i], values[j]])
+                    }
+                }
+            }
+            toSwap.forEach(([p0, p1]) => {
+                const key = p0.id + "." + p1.id;
+                for (let j = 0; j < 4; j++) {
+                    delete colorMaps[j][key];
+                }
+                const id = p0.id;
+                p0.id = p1.id;
+                p1.id = id;
+            });
+            values.sort(sort);
+        }
+        assignColors();
+    }
+
+    let assignColors = function() {
+        for (let quad = 0; quad < 4; quad++) {
+            const toAssign = [];
+            const keysInUse = new Set();
+            const colorMap = colorMaps[quad];
+            const nValues = values.length;
+            for (let i = 0; i <= nValues; i++) {
+                const { key, id0, id1 } = getValueParamsForIndex(i, nValues);
+                keysInUse.add(key);
+                if (!colorMap[key]) {
+                    toAssign.push({ quad, i, key, id0, id1 });
+                }
+            }
+            for (const key in colorMap) {
+                if (!keysInUse.has(key)) {
+                    delete colorMap[key];
+                }
+            }
+            rnd.shuffle(toAssign).forEach(({ quad, i, key, id0, id1 }) => {
+                const neighbours = NEIGHBOURS[quad];
+                except.length = 0;
+                if (!allowRepetition || rnd.bool(config.probabilityNoVerticalRepetition)) {
+                    const idP = i == 1 ? "c" : values[(i - 2 + nValues) % nValues].id;
+                    pushIfNotNull(except, colorMap[idP + "." + id0]);
+                    const idN = i == nValues - 1 ? "e" : values[(i + 1) % nValues].id;
+                    pushIfNotNull(except, colorMap[id1 + "." + idN]);
+                }
+                if (!allowRepetition) {
+                    neighbours.forEach(neighbourIndex => {
+                        pushIfNotNull(except, colorMaps[neighbourIndex][key]);
+                    });
+                } else if (config.noMonochromes) {
+                    const colors = [...new Set(Object.values(colorMap))];
+                    if (colors.length == 1) {
+                        pushIfNotNull(except, colors[0]);
+                    }
+                }
+                if (except.length >= colors.length) {
+                    except.length = 0;
+                }
+                colorMap[key] = rnd.pick(colors, except);
+                sharedColorIdxs[quad].forEach(idx2 => {
+                    colorMaps[idx2][key] = colorMap[key];
+                })
+            });
+        }
+    }
+
+    let draw = function() {
+        const w = width, h = height, w2 = w / 2, h2 = h / 2;
+        const nValues = values.length;
+        const s2 = size / 2;
+        ctx.save();
+        for (let k = 0; k < 2; k++) {
+            const fill = k == 1;
+            ROTATIONS.forEach((rotation, quadIdx) => {
+                const colorMap = colorMaps[quadIdx];
+                ctx.rotate(rotation);
+                for (let i = 0; i <= nValues; i++) {
+                    const { key, p0, p1 } = getValueParamsForIndex(i, nValues);
+                    const color = colorMap[key];
+                    ctx.beginPath();
+                    const x0 = p0 * s2, x1 = p1 * s2;
+                    if (layout == "x") {
+                        drawPath(ctx, x0, -x0, x1, -x1, x1, x1, x0, x0);
+                    } else {
+                        drawPath(ctx, x0, 0, x0, -x0, 0, -x0, 0, -x1, x1, -x1, x1, 0);
+                    }
+                    if (fill) {
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                    } else {
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+                }
+                ctx.rotate(-rotation);
+                ctx.restore();
+            });
+        }
+        ctx.restore();
+    }
+
+    let getValueParamsForIndex = function(i, nValues) {
+        const v0 = values[(i - 1 + nValues) % nValues], v1 = values[i % nValues];
+        let id0 = v0.id, id1 = v1.id;
+        let p0 = ease(v0.progress), p1 = ease(v1.progress);
+        if (p0 > p1) {
+            if (i == 0) {
+                id0 = "c";
+                p0 = 0;
+            } else {
+                id1 = "e";
+                p1 = 1;
+            }
+        }
+        return { key: id0 + "." + id1, p0, p1, id0, id1 };
+    }
+
+    let sort = (p1, p2) => p1.progress - p2.progress;
+
+    let diff = function(pa, pb) {
+        if (pa < pb) return pa - pb + 1;
+        else return pa - pb;
+    }
+
+    let pushIfNotNull = (arr, val) => {
+        if (val != null && !arr.includes(val)) arr.push(val);
+    }
+
+    let drawPath = function(ctx, ...xys) {
+        const n = xys.length;
+        ctx.moveTo(xys[n - 2], xys[n - 1]);
+        for (let i = 0; i < n; i += 2) {
+            ctx.lineTo(xys[i], xys[i + 1]);
+        }
+        return ctx;
+    }
+
+    let toSwap = [];
+    let except = [];
+
+    let NEIGHBOURS = [[3, 2], [2, 3], [1, 0], [0, 1]];
+    let ROTATIONS = [Math.PI, 0, Math.PI / 2, -Math.PI / 2];
+
+    window.onresize = function() {
+        const rect = canvas.getBoundingClientRect();
+        const w = rect.width, h = rect.height, s = window.devicePixelRatio;
+        if (w) {
+            width = Math.floor(w * s);
+            height = Math.floor(h * s);
+            ctx.scale(s, s);
+            canvas.width = Math.ceil(width);
+            canvas.height = Math.ceil(height);
+            canvas.style.width = w + "px";
+            canvas.style.height = h + "px";
+            ctx.resetTransform();
+            ctx.translate(width / 2, height / 2);
+            size = Math.max(width, height);
+            const ratio = Math.max(width / height, height / width);
+            const pow = config.extendedEasePower;
+            const t0 = Math.pow(1 / pow, 1 / (pow - 1));
+            const p0 = Math.pow(t0, pow);
+            const durationExt = (1 - t0) * (ratio - 1);
+            const durationTotal = 1 + durationExt;
+            const tx = 1 / durationTotal;
+            const px = 1 / ratio;
+            const pExt = 1 - px;
+            ease = t => {
+                if (t < tx) return t / tx / ratio;
+                else return px + (Math.pow(t0 + (t - tx) / (1 - tx) * (1 - t0), pow) - p0) / (1 - p0) * pExt;
+            }
+            masterSpeed = config.masterSpeed / durationTotal;
+            extensionFactor = durationTotal;
+            rnd.reset();
+            generate();
+            draw();
+        }
+    }
+
+    document.getElementById('speedSlider').addEventListener('input', e => {
+        config.masterSpeed = parseFloat(e.target.value);
+        document.getElementById('speedVal').textContent = config.masterSpeed.toFixed(3);
+        masterSpeed = config.masterSpeed / extensionFactor; // Update masterSpeed immediately
+    });
+
+    async function fetchWeather(city) {
+      // Use Open-Meteo free API (no key required)
+      // Docs: https://open-meteo.com/en/docs
+      const cityCoords = {
+        'new york': { lat: 40.7128, lon: -74.0060 },
+        'london': { lat: 51.5074, lon: -0.1278 },
+        'tokyo': { lat: 35.6895, lon: 139.6917 },
+        'paris': { lat: 48.8566, lon: 2.3522 },
+        'sydney': { lat: -33.8688, lon: 151.2093 }
+      };
+      const coords = cityCoords[city.toLowerCase()];
+      if (!coords) return null;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true`;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        return data.current_weather;
+      } catch {
+        return null;
+      }
+    }
+
+    function weatherToColors(weather) {
+      // Map weather code to color palettes
+      // See https://open-meteo.com/en/docs#api_form for weather codes
+      if (!weather) return ["#b0b0b0", "#888", "#444", "#222", "#fff"];
+      const code = weather.weathercode;
+      if (code === 0) return ["#87ceeb", "#ffe156", "#fff", "#06d6a0", "#ffb366"]; // Clear sky
+      if (code < 3) return ["#b0c4de", "#ffe156", "#fff", "#a13b8e", "#e94ca4"]; // Mainly clear/partly cloudy
+      if (code < 45) return ["#888", "#b0b0b0", "#e0e0e0", "#ffe156", "#ff7c43"]; // Cloudy
+      if (code < 60) return ["#4a90e2", "#2bb67a", "#00cfff", "#2300d1", "#fff"];// Drizzle/rain
+      if (code < 80) return ["#e94ca4", "#a13b8e", "#444", "#fff", "#ff0000"]; // Snow
+      if (code < 100) return ["#222", "#444", "#888", "#fff", "#ffe156"]; // Thunderstorm/other
+      return ["#b0b0b0", "#888", "#444", "#222", "#fff"];
+    }
+
+    async function updateWeatherColors(city) {
+      const status = document.getElementById('weatherStatus');
+      status.textContent = 'Loading...';
+      const weather = await fetchWeather(city);
+      if (weather) {
+        status.textContent = `${weather.temperature}°C, code ${weather.weathercode}`;
+        // Update the color palette for the generative art
+        config.weatherColors = weatherToColors(weather);
+      } else {
+        status.textContent = 'Weather unavailable';
+        config.weatherColors = ["#b0b0b0", "#888", "#444", "#222", "#fff"];
+      }
+      // Force regenerate with new colors
+      generate();
+    }
+
+    document.getElementById('citySelect').addEventListener('change', e => {
+      updateWeatherColors(e.target.value);
+    });
+
+    // On load, set initial weather
+    updateWeatherColors(document.getElementById('citySelect').value);
+
+    // Patch randomize to use weather colors if available
+    const origRandomize = randomize;
+    randomize = function() {
+      const features = origRandomize();
+      if (config.weatherColors) {
+        features.colors = config.weatherColors;
+      }
+      return features;
+    };
+
+    requestAnimationFrame(updateRAF);
+    setInterval(update, 16.667);
+    onresize();
+  </script>
+</body>
+</html>

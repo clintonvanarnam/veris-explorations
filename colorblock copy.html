@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Generative Box Grid Animation</title>
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+    body { background: #222; }
+    canvas { display: block; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+    div { position: fixed; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.5); padding: 10px 18px 10px 10px; border-radius: 8px; width: 200px; }
+    label { color: #fff; }
+    span { color: #fff; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="controlsPanel">
+    <label>Square Size <input id="squareSize" type="range" min="0.1" max="0.45" step="0.01" value="0.40"></label>
+    <span id="squareSizeVal">0.40</span><br>
+    <label>Speed <input id="speedSlider" type="range" min="0.01" max="1.0" step="0.01" value="0.07"></label>
+    <span id="speedVal">0.07</span><br>
+    <label>Stroke Thickness <input id="strokeSlider" type="range" min="0.1" max="1" step="0.01" value="0.5"></label>
+    <span id="strokeVal">0.5</span><br>
+    <label>Line Grey <input id="greySlider" type="range" min="0" max="255" step="1" value="136"></label>
+    <span id="greyVal">#888888</span><br>
+    <fieldset style="margin-top:10px; border:1px solid #444; border-radius:6px; padding:6px;">
+      <legend style="color:#fff;">Animation Mode</legend>
+      <label style="color:#fff;"><input type="radio" name="animMode" value="center" checked> Center square changes color</label><br>
+      <label style="color:#fff;"><input type="radio" name="animMode" value="lines"> Vertical/horizontal lines random colors</label><br>
+      <label style="color:#fff;"><input type="radio" name="animMode" value="bw"> Neither (just black/white)</label>
+    </fieldset>
+  </div>
+  <script>
+  // --- Config and Seeded Random ---
+  const Config = {
+    seed: 123456, // Hard-coded seed
+    colors: ['#ff0055', '#00cfff', '#ffe156', '#06d6a0', '#ff7c43'],
+    bgColor: '#222',
+    speed: 0.12 // Animation speed
+  };
+
+  // Simple deterministic PRNG (Mulberry32)
+  function mulberry32(seed) {
+    return function() {
+      let t = seed += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+
+  // RandomUtil using seeded PRNG
+  const RandomUtil = {
+    _rand: mulberry32(Config.seed),
+    random() { return this._rand(); },
+    int(a, b) { return Math.floor(this.random() * (b - a + 1)) + a; },
+    pick(arr) { return arr[Math.floor(this.random() * arr.length)]; },
+    shuffle(arr) {
+      let a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        let j = Math.floor(this.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+  };
+
+  // MathUtil
+  const MathUtil = {
+    lerp(a, b, t) { return a + (b - a) * t; },
+    clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+  };
+
+  // tokenData (for fxhash-like compatibility)
+  const tokenData = { hash: Config.seed.toString(16).padStart(64, '0') };
+
+  // --- 1-Point Perspective Grid with Central Square ---
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0;
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+    ctx.scale(dpr, dpr);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  let squareMargin = 0.40;
+  let animSpeed = 0.05;
+  let strokeThickness = 2;
+  let lineGrey = 136;
+  // Central square color state
+  const SQUARE_COLORS = ['#2300d1', '#fa00cc', '#ff0000', '#ff80e3', '#00cfff', '#ffe156', '#06d6a0', '#ff7c43', '#000'];
+  let currentSquareColor = SQUARE_COLORS[0];
+  let lastPhase = 0;
+
+  let squareCenter = { x: 0.5, y: 0.5 }; // normalized center (0-1)
+
+  canvas.addEventListener('mousedown', function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    // Normalize mouse position to [0,1]
+    let x = ((e.clientX - rect.left) / rect.width);
+    let y = ((e.clientY - rect.top) / rect.height);
+    // Clamp so the square stays within visible area (5% margin)
+    const margin = 0.05;
+    x = MathUtil.clamp(x, margin, 1 - margin);
+    y = MathUtil.clamp(y, margin, 1 - margin);
+    squareCenter.x = x;
+    squareCenter.y = y;
+  });
+
+  const squareSizeSlider = document.getElementById('squareSize');
+  const squareSizeVal = document.getElementById('squareSizeVal');
+  const speedSlider = document.getElementById('speedSlider');
+  const speedVal = document.getElementById('speedVal');
+  const strokeSlider = document.getElementById('strokeSlider');
+  const strokeVal = document.getElementById('strokeVal');
+  const greySlider = document.getElementById('greySlider');
+  const greyVal = document.getElementById('greyVal');
+  squareSizeSlider.addEventListener('input', e => {
+    squareMargin = parseFloat(e.target.value);
+    squareSizeVal.textContent = squareMargin.toFixed(2);
+  });
+  speedSlider.addEventListener('input', e => {
+    animSpeed = parseFloat(e.target.value);
+    speedVal.textContent = animSpeed.toFixed(2);
+  });
+  strokeSlider.addEventListener('input', e => {
+    strokeThickness = parseInt(e.target.value, 10);
+    strokeVal.textContent = strokeThickness;
+  });
+  greySlider.addEventListener('input', e => {
+    lineGrey = parseInt(e.target.value, 10);
+    greyVal.textContent = `#${lineGrey.toString(16).padStart(2, '0').repeat(3)}`;
+  });
+
+  let animMode = 'center';
+  const animModeRadios = document.getElementsByName('animMode');
+  for (const radio of animModeRadios) {
+    radio.addEventListener('change', e => {
+      if (e.target.checked) animMode = e.target.value;
+    });
+  }
+
+  function animatePerspectiveGrid(time) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+
+    // Use slider value for the central square
+    const margin = squareMargin;
+    const gridCount = 14;
+
+    // Central square (back wall)
+    const sqW = W * (1 - 2 * margin);
+    const sqH = H * (1 - 2 * margin);
+    // Centered at squareCenter
+    const sqX = W * squareCenter.x - sqW / 2;
+    const sqY = H * squareCenter.y - sqH / 2;
+
+    // Draw the central square with current color
+    ctx.save();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.fillStyle = (animMode === 'center') ? currentSquareColor : '#fff';
+    ctx.fillRect(sqX, sqY, sqW, sqH);
+    ctx.strokeRect(sqX, sqY, sqW, sqH);
+    ctx.restore();
+
+    // Only draw the bottom perspective lines
+    ctx.save();
+    ctx.lineWidth = Math.max(0.1, Math.min(strokeThickness, 1));
+    ctx.strokeStyle = `#${lineGrey.toString(16).padStart(2, '0').repeat(3)}`;
+    for (let i = 0; i <= gridCount; i++) {
+      const t = i / gridCount;
+      const x0 = MathUtil.lerp(0, W, t);
+      const yb0 = H;
+      const x1 = MathUtil.lerp(sqX, sqX + sqW, t);
+      const yb1 = sqY + sqH;
+      ctx.beginPath();
+      ctx.moveTo(x0, yb0);
+      ctx.lineTo(x1, yb1);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Draw the receding squares on top
+    ctx.save();
+    ctx.lineWidth = Math.max(0.1, Math.min(strokeThickness, 1));
+    let SQUARE_LINE_COLORS = [`#${lineGrey.toString(16).padStart(2, '0').repeat(3)}`];
+    for (let j = 1; j < gridCount; j++) {
+      // Autonomous animation: each line gets its own phase offset and speed
+      const phaseOffset = j * 0.13;
+      const speed = animSpeed * (0.8 + 0.4 * Math.sin(j * 1.7));
+      const animT = (time * 0.001 * speed + phaseOffset) % 1;
+      const phase = ((j / gridCount) + animT) % 1;
+      const prevPhase = ((j / gridCount) + ((time - 16.667) * 0.001 * speed + phaseOffset) % 1) % 1;
+      const xL = MathUtil.lerp(0, sqX, phase);
+      const xR = MathUtil.lerp(W, sqX + sqW, phase);
+      const yT = MathUtil.lerp(0, sqY, phase);
+      const yB = MathUtil.lerp(H, sqY + sqH, phase);
+      ctx.strokeStyle = SQUARE_LINE_COLORS[0];
+      if (xL < sqX && xR > sqX + sqW && yT < sqY && yB > sqY + sqH) {
+        ctx.beginPath();
+        ctx.moveTo(xL, yT);
+        ctx.lineTo(xR, yT);
+        ctx.lineTo(xR, yB);
+        ctx.lineTo(xL, yB);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    requestAnimationFrame(animatePerspectiveGrid);
+  }
+
+  // Add a click handler to log crossings
+  if (!window._perspectiveGridClickHandlerSet) {
+    window.addEventListener('click', function() {
+      if (window._perspectiveGridCrossings && window._perspectiveGridCrossings.length) {
+        console.log('CROSSINGS ON CLICK:', window._perspectiveGridCrossings);
+      }
+    });
+    window._perspectiveGridClickHandlerSet = true;
+  }
+
+  animatePerspectiveGrid(performance.now());
+  </script>
+</body>
+</html>
