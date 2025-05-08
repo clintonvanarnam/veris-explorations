@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GLSL Generative Art - Expanding Spectrum Circles</title>
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: #111; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<div id="controls" style="position:fixed;top:10px;left:10px;z-index:10;background:rgba(0,0,0,0.5);padding:10px;border-radius:8px;">
+  <label>Start Size <input id="minR" type="range" min="0.01" max="0.5" step="0.01" value="0.01"></label><br>
+  <label>Max Size <input id="maxR" type="range" min="1.0" max="1.03" step="0.01" value="1.0"></label><br>
+  <label>Interval <input id="interval" type="range" min="0.1" max="2.0" step="0.01" value="0.7"></label><br>
+  <label>Circles <input id="numCircles" type="range" min="1" max="16" step="1" value="9"></label><br>
+  <label>Color 1 <input id="color1" type="color" value="#2300d1"></label>
+  <label>Color 2 <input id="color2" type="color" value="#fa00cc"></label>
+  <label>Color 3 <input id="color3" type="color" value="#ff0000"></label>
+  <label>Color 4 <input id="color4" type="color" value="#ff80e3"></label><br>
+  <label>BG Mode
+    <select id="bgMode">
+      <option value="dynamic">Dynamic Gradient</option>
+      <option value="solid">Solid Complement</option>
+      <option value="inverse" selected>Inverse (Realtime)</option>
+      <option value="triad">Triad Complement (Realtime)</option>
+      <option value="black">Black</option>
+      <option value="white">White</option>
+    </select>
+  </label>
+</div>
+<button id="toggleControls" style="position:fixed;top:10px;right:10px;z-index:11;padding:8px 16px;border-radius:8px;background:#222;color:#fff;border:none;cursor:pointer;">Hide Controls</button>
+<script id="fragShader" type="x-shader/x-fragment">
+precision highp float;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+// Adjustable parameters
+uniform float u_minR;      // starting radius
+uniform float u_maxR;      // max radius
+uniform float u_interval;  // time between new circles
+uniform int u_numCircles;  // number of overlapping circles
+uniform vec3 u_color1;
+uniform vec3 u_color2;
+uniform vec3 u_color3;
+uniform vec3 u_color4;
+uniform int u_bgMode;
+
+const float glow = 0.12;
+
+vec3 aberration(vec2 uv, float amount) {
+    // Slightly offset for color channels
+    float r = length(uv + vec2(amount, 0.0));
+    float g = length(uv);
+    float b = length(uv - vec2(amount, 0.0));
+    return vec3(r, g, b);
+}
+vec3 waterPalette(float t) {
+    // Deep blue to cyan
+    return mix(vec3(0.1,0.3,0.7), vec3(0.2,0.9,1.0), t);
+}
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    uv = uv * 2.0 - 1.0;
+    uv.x *= u_resolution.x / u_resolution.y;
+    float t = u_time;
+    
+    // Compute the main color for the current pixel (before adding to color)
+    vec3 mainCol = vec3(0.0);
+    float d = length(uv);
+    for (int i = 0; i < 16; i++) {
+        if (i >= u_numCircles) break;
+        float randPhase = fract(sin(float(i) * 91.17) * 43758.5453);
+        float phase = float(i) * 0.7854 + randPhase * 6.2831;
+        float cycle = mod(t + phase, u_interval * float(u_numCircles));
+        float age = cycle;
+        float normAge = age / (u_interval * float(u_numCircles));
+        float fadeIn = smoothstep(0.0, 0.55, normAge);
+        float fadeOut = 1.0 - smoothstep(0.7, 1.0, normAge);
+        float fade = fadeIn * fadeOut;
+        float r = mix(u_minR, u_maxR, normAge);
+        float glowStrength = 0.2;
+        float waterT = mod(age / (u_interval * float(u_numCircles)), 1.0);
+        vec3 sunset1 = u_color1;
+        vec3 sunset2 = u_color2;
+        vec3 sunset3 = u_color3;
+        vec3 sunset4 = u_color4;
+        float sunsetT = 0.5 + 0.5 * sin(phase + t * 0.2 + float(i));
+        vec3 sunsetCol = mix(mix(sunset1, sunset2, sunsetT), mix(sunset3, sunset4, sunsetT), 0.5 + 0.5 * cos(phase + t * 0.13 + float(i)));
+        float blueAberr = 0.18 + 0.15 * sin(t + float(i));
+        float yellowAberr = -0.18 - 0.15 * sin(t + float(i));
+        float dr = length(uv + vec2(blueAberr, 0.0));
+        float dg = length(uv);
+        float db = length(uv + vec2(yellowAberr, 0.0));
+        float edgeR = pow(smoothstep(r, r - glow, dr), 2.5) * glowStrength;
+        float edgeG = pow(smoothstep(r, r - glow, dg), 2.5) * glowStrength;
+        float edgeB = pow(smoothstep(r, r - glow, db), 2.5) * glowStrength;
+        float glowR = pow(smoothstep(r + glow * 1.2, r, dr), 1.5) * 0.7;
+        float glowG = pow(smoothstep(r + glow * 1.2, r, dg), 1.5) * 0.7;
+        float glowB = pow(smoothstep(r + glow * 1.2, r, db), 1.5) * 0.7;
+        vec3 baseCol = sunsetCol;
+        vec3 aberrCol = vec3(baseCol.r * edgeR + baseCol.r * edgeG + baseCol.r * edgeB,
+                             baseCol.g * edgeR + baseCol.g * edgeG + baseCol.g * edgeB,
+                             baseCol.b * edgeR + baseCol.b * edgeG + baseCol.b * edgeB);
+        vec3 aberrGlow = vec3(baseCol.r * glowR + baseCol.r * glowG + baseCol.r * glowB,
+                              baseCol.g * glowR + baseCol.g * glowG + baseCol.g * glowB,
+                              baseCol.b * glowR + baseCol.b * glowG + baseCol.b * glowB);
+        mainCol += baseCol * (edgeR + edgeG + edgeB) * fade * 0.4;
+        mainCol += baseCol * (glowR + glowG + glowB) * fade * 0.25;
+        for (int trailStep = 1; trailStep <= 8; trailStep++) {
+            float trailAge = age - float(trailStep) * 0.08 * (u_interval * float(u_numCircles));
+            if (trailAge < 0.0) continue;
+            float trailR = mix(u_minR, u_maxR, trailAge / (u_interval * float(u_numCircles)));
+            float trailFade = fade * pow(0.7, float(trailStep));
+            float fog = 0.7 + 0.3 * sin(phase + float(trailStep) * 1.7 + float(trailStep) * 0.13 + u_time * 0.7 + float(i) * 0.9);
+            float foggy = smoothstep(trailR + glow * 1.5, trailR - glow * 0.5, d) * trailFade * fog;
+            mainCol += baseCol * foggy * 0.25;
+        }
+    }
+    mainCol = max(mainCol, vec3(0.0)); // Ensure no negative/dark values
+    mainCol = min(mainCol, vec3(1.0));
+    mainCol = pow(mainCol, vec3(0.7));
+    // Compute a more visible, dynamic background gradient
+    float y = gl_FragCoord.y / u_resolution.y;
+    vec3 gradTop = mix(vec3(0.2, 0.3, 0.5), vec3(1.0) - mainCol * 0.5, 0.4);
+    vec3 gradBot = mix(vec3(0.9, 0.7, 0.4), vec3(1.0) - mainCol * 0.2, 0.2);
+    vec3 bgCol;
+    if (u_bgMode == 0) {
+      bgCol = mix(gradTop, gradBot, y); // dynamic gradient
+    } else if (u_bgMode == 1) {
+      bgCol = vec3(1.0) - mainCol; // solid complement
+    } else if (u_bgMode == 2) {
+      // Inverse: invert the color for each pixel in real time
+      bgCol = vec3(1.0) - mainCol;
+    } else if (u_bgMode == 3) {
+      // Triad complement: rotate hue by 120 degrees (triad)
+      // Convert RGB to HSV, rotate hue, then back to RGB
+      vec3 c = mainCol;
+      float maxc = max(c.r, max(c.g, c.b));
+      float minc = min(c.r, min(c.g, c.b));
+      float delta = maxc - minc;
+      float h = 0.0;
+      if (delta > 0.00001) {
+        if (maxc == c.r) {
+          h = mod((c.g - c.b) / delta, 6.0);
+        } else if (maxc == c.g) {
+          h = ((c.b - c.r) / delta) + 2.0;
+        } else {
+          h = ((c.r - c.g) / delta) + 4.0;
+        }
+        h /= 6.0;
+        if (h < 0.0) h += 1.0;
+      }
+      float s = (maxc <= 0.0) ? 0.0 : delta / maxc;
+      float v = maxc;
+      // Rotate hue by 1/3 (120 degrees)
+      h = mod(h + 1.0/3.0, 1.0);
+      // Convert HSV back to RGB
+      float c1 = v * s;
+      float x = c1 * (1.0 - abs(mod(h * 6.0, 2.0) - 1.0));
+      float m = v - c1;
+      vec3 rgbTriad;
+      if (0.0 <= h && h < 1.0/6.0) rgbTriad = vec3(c1, x, 0.0);
+      else if (1.0/6.0 <= h && h < 2.0/6.0) rgbTriad = vec3(x, c1, 0.0);
+      else if (2.0/6.0 <= h && h < 3.0/6.0) rgbTriad = vec3(0.0, c1, x);
+      else if (3.0/6.0 <= h && h < 4.0/6.0) rgbTriad = vec3(0.0, x, c1);
+      else if (4.0/6.0 <= h && h < 5.0/6.0) rgbTriad = vec3(x, 0.0, c1);
+      else rgbTriad = vec3(c1, 0.0, x);
+      bgCol = rgbTriad + m;
+    } else if (u_bgMode == 4) {
+      bgCol = vec3(0.0); // black
+    } else {
+      bgCol = vec3(1.0); // white
+    }
+    vec3 color = max(bgCol, mainCol);
+    gl_FragColor = vec4(color, 1.0);
+}
+</script>
+<script>
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Vertex shader (simple passthrough)
+const vertShaderSrc = `
+attribute vec2 a_position;
+void main() {
+  gl_Position = vec4(a_position, 0, 1);
+}`;
+
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(shader));
+  }
+  return shader;
+}
+
+function createProgram(gl, vertSrc, fragSrc) {
+  const vs = createShader(gl, gl.VERTEX_SHADER, vertSrc);
+  const fs = createShader(gl, gl.FRAGMENT_SHADER, fragSrc);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    throw new Error(gl.getProgramInfoLog(prog));
+  }
+  return prog;
+}
+
+const fragShaderSrc = document.getElementById('fragShader').textContent;
+const program = createProgram(gl, vertShaderSrc, fragShaderSrc);
+gl.useProgram(program);
+
+// Set up a fullscreen quad
+const posLoc = gl.getAttribLocation(program, 'a_position');
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1, -1, 1, -1, -1, 1,
+  -1, 1, 1, -1, 1, 1
+]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+// Uniform locations
+const u_time = gl.getUniformLocation(program, 'u_time');
+const u_resolution = gl.getUniformLocation(program, 'u_resolution');
+const u_minR = gl.getUniformLocation(program, 'u_minR');
+const u_maxR = gl.getUniformLocation(program, 'u_maxR');
+const u_interval = gl.getUniformLocation(program, 'u_interval');
+const u_numCircles = gl.getUniformLocation(program, 'u_numCircles');
+const u_color1 = gl.getUniformLocation(program, 'u_color1');
+const u_color2 = gl.getUniformLocation(program, 'u_color2');
+const u_color3 = gl.getUniformLocation(program, 'u_color3');
+const u_color4 = gl.getUniformLocation(program, 'u_color4');
+const u_bgMode = gl.getUniformLocation(program, 'u_bgMode');
+
+function hexToRgbNorm(hex) {
+  const bigint = parseInt(hex.slice(1), 16);
+  return [
+    ((bigint >> 16) & 255) / 255,
+    ((bigint >> 8) & 255) / 255,
+    (bigint & 255) / 255
+  ];
+}
+
+let minR = 0.01, maxR = 1.0, interval = 0.7, numCircles = 9;
+let color1 = '#2300d1', color2 = '#fa00cc', color3 = '#ff0000', color4 = '#ff80e3';
+let bgMode = 'inverse';
+document.getElementById('bgMode').value = 'inverse';
+
+function logAllSettings() {
+  console.log('Start Size:', minR, 'Max Size:', maxR, 'Interval:', interval, 'Circles:', numCircles,
+    'Color1:', color1, 'Color2:', color2, 'Color3:', color3, 'Color4:', color4, 'BG Mode:', bgMode);
+}
+
+document.getElementById('minR').addEventListener('input', e => {
+  minR = parseFloat(e.target.value);
+  logAllSettings();
+});
+document.getElementById('maxR').addEventListener('input', e => {
+  maxR = parseFloat(e.target.value);
+  logAllSettings();
+});
+document.getElementById('interval').addEventListener('input', e => {
+  interval = parseFloat(e.target.value);
+  logAllSettings();
+});
+document.getElementById('numCircles').addEventListener('input', e => {
+  numCircles = parseInt(e.target.value);
+  logAllSettings();
+});
+document.getElementById('color1').addEventListener('input', e => {
+  color1 = e.target.value;
+  logAllSettings();
+});
+document.getElementById('color2').addEventListener('input', e => {
+  color2 = e.target.value;
+  logAllSettings();
+});
+document.getElementById('color3').addEventListener('input', e => {
+  color3 = e.target.value;
+  logAllSettings();
+});
+document.getElementById('color4').addEventListener('input', e => {
+  color4 = e.target.value;
+  logAllSettings();
+});
+document.getElementById('bgMode').addEventListener('change', e => {
+  bgMode = e.target.value;
+  logAllSettings();
+});
+
+document.getElementById('toggleControls').addEventListener('click', function() {
+  const controls = document.getElementById('controls');
+  if (controls.style.display === 'none') {
+    controls.style.display = '';
+    this.textContent = 'Hide Controls';
+  } else {
+    controls.style.display = 'none';
+    this.textContent = 'Show Controls';
+  }
+});
+
+function render(time) {
+  gl.uniform1f(u_time, time * 0.001);
+  gl.uniform2f(u_resolution, canvas.width, canvas.height);
+  gl.uniform1f(u_minR, minR);
+  gl.uniform1f(u_maxR, maxR);
+  gl.uniform1f(u_interval, interval);
+  gl.uniform1i(u_numCircles, numCircles);
+  gl.uniform3fv(u_color1, hexToRgbNorm(color1));
+  gl.uniform3fv(u_color2, hexToRgbNorm(color2));
+  gl.uniform3fv(u_color3, hexToRgbNorm(color3));
+  gl.uniform3fv(u_color4, hexToRgbNorm(color4));
+  gl.uniform1i(u_bgMode,
+    bgMode === 'dynamic' ? 0 : bgMode === 'solid' ? 1 : bgMode === 'inverse' ? 2 : bgMode === 'triad' ? 3 : bgMode === 'black' ? 4 : 5);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
