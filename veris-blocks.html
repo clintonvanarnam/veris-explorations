@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Veris Background</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+    }
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: -1;
+      pointer-events: none;
+    }
+    .content {
+      position: relative;
+      z-index: 1;
+      padding: 4rem;
+      font-family: sans-serif;
+      min-height: 300vh;
+    }
+    .content h1 {
+      font-size: 7rem;
+      font-weight: bold;
+      color: black;
+      mix-blend-mode: normal;
+      margin-bottom: 2rem;
+    }
+    .content p, .content .veris-desc {
+      color: white;
+      mix-blend-mode: difference;
+      font-size: 2rem;
+      max-width: 700px;
+      margin-bottom: 2rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="content">
+    <h1>VERIS</h1>
+    <!-- <p>Background rectangles based on brand visual language.</p> -->
+    <!-- <p class="veris-desc">VERIS is a generative art experiment exploring motion, interaction, and contrast. The rectangles above are animated by wind-like forces and respond to your mouse, creating a dynamic, ever-changing composition. Scroll to reduce the number of blocks. Press 'b' to toggle a black square overlay.</p> -->
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.4.2/lib/p5.min.js"></script>
+  <script>
+    let modules = [];
+    let startCount = 500;
+    let minCount = 1;
+    let scrollStep = (startCount - minCount) / window.innerHeight;
+    let currentCount = startCount;
+    let sizeScale = 8; // <--- CONTROL THIS VARIABLE TO SCALE ALL RECTANGLES
+    let windSpeedMultiplier = 0.08; // <--- CONTROL THIS VARIABLE TO ADJUST MOVEMENT SPEED
+    let rectOffset = .25; // <--- CONTROL THIS VARIABLE TO ADJUST RECTANGLE OFFSET (0.4 = 40% of width/height)
+    let mouseMagnetStrength = 100; // <--- CONTROL THIS VARIABLE TO ADJUST MOUSE MAGNET REPULSION (was maxRepel)
+    let showBlackTop = false; // Press 'b' to toggle black square on top
+    let camInputMode = false; // Press 'i' to use camera data for stroke weight
+    let darkMode = false; // Press 'd' to toggle dark mode
+    let maxCornerRadius = 2; // Maximum corner radius for rectangles
+    let variationMode = 0; // 0 = off, 1 = pattern 1, 2 = pattern 2, ...
+    let patternVariations = [];
+    let variationType = 0; // Cycles through different rhythmic types
+    const VARIATION_TYPES = 7; // Number of pattern types
+    const VARIATION_NAMES = [
+      'Horizontal Wave',
+      'Checkerboard',
+      'Diagonal Wave',
+      'Vertical Stripes',
+      'Concentric Rings',
+      'Grid Pulse',
+      'Random Clusters'
+    ];
+    let patternRectWidthRatio = 0.7; // Controls width of rectangles in pattern mode
+    let patternRectHeightRatio = 0.5; // Controls height of rectangles in pattern mode
+    let patternRowSpacing = 1; // Controls vertical spacing between rows (1 = default, <1 = closer)
+    let patternColSpacing = 1; // Controls horizontal spacing between columns (1 = default, <1 = closer)
+    let video;
+    let offsetMovementMode = false; // Press 'm' to toggle rhythmic offset movement
+    let patternFullScreen = false; // If true, pattern fills the whole canvas
+    let opacityGradientMode = false; // Press 'o' to toggle vertical opacity gradient
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      rectMode(CORNER);
+      noStroke();
+      updateModules(startCount);
+      background(255); // Ensure p5.js canvas background is white
+      // Setup camera but hide it by default
+      video = createCapture(VIDEO);
+      video.size(32, 24); // Small for performance
+      video.hide();
+    }
+
+    function updateModules(count) {
+      // Only add or remove modules as needed, don't recreate all
+      let diff = count - modules.length;
+      if (diff > 0) {
+        // Add new modules
+        for (let i = 0; i < diff; i++) {
+          let rw = random(20, 100) * sizeScale; // 1/4 the previous width range
+          let rh = random(10, 80) * sizeScale;  // 1/4 the previous height range
+          modules.push({
+            x: random(width),
+            y: random(height),
+            rw: rw,
+            rh: rh,
+            speedX: random(-0.2, 0.2),
+            speedY: random(-0.2, 0.2),
+            type: 2
+          });
+        }
+      } else if (diff < 0) {
+        // Remove modules from the end
+        modules.splice(diff);
+      }
+    }
+
+    function draw() {
+      // Only pattern mode remains
+      if (darkMode) {
+        background(0);
+      } else {
+        background(255);
+      }
+      let t = millis() * 0.001;
+      let patternX = patternFullScreen ? 0 : width / 2;
+      let patternW = patternFullScreen ? width : width / 2;
+      // Pattern mode only
+      let bestCols = 1;
+      let bestRows = 1;
+      let minDiff = Infinity;
+      for (let rows = 1; rows <= currentCount; rows++) {
+        let cols = ceil(currentCount / rows);
+        let gridAspect = (cols / rows) * (height / patternW);
+        let diff = abs(gridAspect - 1);
+        if (cols * rows >= currentCount && diff < minDiff) {
+          minDiff = diff;
+          bestCols = cols;
+          bestRows = rows;
+        }
+      }
+      let cols = bestCols;
+      let rows = bestRows;
+      let colSpacingPx = patternColSpacing * 8;
+      let rowSpacingPx = patternRowSpacing * 8;
+      let gridW = (patternW - colSpacingPx * (cols - 1)) / cols;
+      let gridH = (height - rowSpacingPx * (rows - 1)) / rows;
+      let totalGridW = cols * gridW + (cols - 1) * colSpacingPx;
+      let totalGridH = rows * gridH + (rows - 1) * rowSpacingPx;
+      let offsetX = patternX + (patternW - totalGridW) / 2;
+      let offsetY = (height - totalGridH) / 2;
+      if (camInputMode) video.loadPixels();
+      // Generate rhythmic pattern variations if variationMode is on
+      if (variationMode > 0) {
+        patternVariations = [];
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            let idx = row * cols + col;
+            let rwRatio, rhRatio;
+            if (variationType === 0) {
+              // Horizontal sinusoidal wave
+              rwRatio = 0.7 + 0.25 * sin(TWO_PI * col / cols + row * 0.5);
+              rhRatio = 0.5 + 0.2 * cos(TWO_PI * row / rows + col * 0.5);
+            } else if (variationType === 1) {
+              // Checkerboard modulation
+              let checker = ((row + col) % 2 === 0) ? 1 : -1;
+              rwRatio = 0.7 + 0.2 * checker;
+              rhRatio = 0.5 + 0.15 * checker;
+            } else if (variationType === 2) {
+              // Diagonal wave
+              let diag = (row + col) / (rows + cols);
+              rwRatio = 0.5 + 0.4 * sin(TWO_PI * diag);
+              rhRatio = 0.4 + 0.3 * cos(TWO_PI * diag);
+            } else if (variationType === 3) {
+              // Vertical stripes
+              rwRatio = 0.6 + 0.35 * sin(TWO_PI * col / cols);
+              rhRatio = 0.5 + 0.1 * cos(TWO_PI * col / cols);
+            } else if (variationType === 4) {
+              // Concentric rings (distance from center)
+              let cx = cols / 2, cy = rows / 2;
+              let distNorm = dist(col, row, cx, cy) / max(cx, cy);
+              rwRatio = 0.7 - 0.3 * distNorm + 0.1 * sin(TWO_PI * distNorm);
+              rhRatio = 0.5 - 0.2 * distNorm + 0.1 * cos(TWO_PI * distNorm);
+            } else if (variationType === 5) {
+              // Grid pulse (modulate by row and col together)
+              rwRatio = 0.7 + 0.2 * sin(TWO_PI * row / rows + col / cols);
+              rhRatio = 0.5 + 0.2 * cos(TWO_PI * row / rows - col / cols);
+            } else if (variationType === 6) {
+              // Random clusters (blocky randomness)
+              let blockSize = 2 + floor(random(1, 4));
+              let blockRow = floor(row / blockSize);
+              let blockCol = floor(col / blockSize);
+              let base = noise(blockRow * 0.7, blockCol * 0.7);
+              rwRatio = 0.5 + 0.4 * base;
+              rhRatio = 0.4 + 0.3 * base;
+            }
+            patternVariations.push({ rwRatio, rhRatio });
+          }
+        }
+      }
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          let i = row * cols + col;
+          let gx = col * (gridW + colSpacingPx) + offsetX;
+          let gy = row * (gridH + rowSpacingPx) + offsetY;
+          let angle = 0;
+          if (offsetMovementMode) {
+            // Angle points from cell center to mouse
+            let cx = gx + gridW / 2;
+            let cy = gy + gridH / 2;
+            angle = atan2(mouseY - cy, mouseX - cx);
+          }
+          let alpha = 255;
+          if (opacityGradientMode) {
+            alpha = lerp(0, 255, row / (rows - 1));
+          }
+          push();
+          translate(gx, gy);
+          if (offsetMovementMode) {
+            translate(gridW / 2, gridH / 2);
+            rotate(angle);
+            translate(-gridW / 2, -gridH / 2);
+          }
+          let rwRatio, rhRatio;
+          if (variationMode > 0 && patternVariations[i]) {
+            rwRatio = patternVariations[i].rwRatio;
+            rhRatio = patternVariations[i].rhRatio;
+          } else {
+            rwRatio = patternRectWidthRatio;
+            rhRatio = patternRectHeightRatio;
+          }
+          let rw = gridW * rwRatio;
+          let rh = gridH * rhRatio;
+          let cornerRadius = min(maxCornerRadius, min(rw, rh) * 0.25);
+          // Back rectangle
+          let backFill = darkMode ? color(0, alpha) : color(255, alpha);
+          let backStroke = darkMode ? color(255, alpha) : color(0, alpha);
+          fill(backFill);
+          stroke(backStroke);
+          strokeWeight(1);
+          rect((gridW - rw) / 2 + rw * rectOffset, (gridH - rh) / 2 - rh * rectOffset, rw, rh, cornerRadius);
+          // Front rectangle
+          let frontFill = darkMode ? color(0, alpha) : color(255, alpha);
+          fill(frontFill);
+          let sw = 2;
+          if (camInputMode && video.pixels.length > 0 && i < currentCount) {
+            let x = floor(map(col, 0, cols-1, 0, video.width-1));
+            let y = floor(map(row, 0, rows-1, 0, video.height-1));
+            let idx = 4 * (y * video.width + x);
+            let r = video.pixels[idx];
+            let g = video.pixels[idx+1];
+            let b = video.pixels[idx+2];
+            let bright = (r + g + b) / 3;
+            sw = map(bright, 0, 255, 5, 1);
+          }
+          let greenStroke = color(0, 128, 0, alpha); // green with alpha
+          stroke(greenStroke);
+          strokeWeight(sw);
+          rect((gridW - rw) / 2, (gridH - rh) / 2, rw, rh, cornerRadius);
+          pop();
+        }
+      }
+    }
+
+    function keyPressed() {
+      if (key === '2') {
+        variationMode = (variationMode + 1) % (VARIATION_TYPES + 1); // 0 = off, 1 = type1, 2 = type2, ...
+        if (variationMode === 0) {
+          variationType = 0;
+          patternVariations = [];
+          console.log('Pattern: Default');
+        } else {
+          variationType = (variationMode - 1) % VARIATION_TYPES;
+          patternVariations = [];
+          console.log('Pattern:', VARIATION_NAMES[variationType]);
+        }
+      }
+      if (key === 'm' || key === 'M') {
+        offsetMovementMode = !offsetMovementMode;
+        console.log('Offset Movement:', offsetMovementMode ? 'ON' : 'OFF');
+      }
+      if (key === 'f' || key === 'F') {
+        let fs = fullscreen();
+        fullscreen(!fs);
+        patternFullScreen = !patternFullScreen;
+        setTimeout(() => {
+          resizeCanvas(windowWidth, windowHeight);
+          updateModules(currentCount);
+        }, 100);
+      }
+      if (key === 'd' || key === 'D') {
+        darkMode = !darkMode;
+      }
+      if (key === 'i' || key === 'I') {
+        camInputMode = !camInputMode;
+      }
+      if (key === 'o' || key === 'O') {
+        opacityGradientMode = !opacityGradientMode;
+        console.log('Opacity Gradient:', opacityGradientMode ? 'ON' : 'OFF');
+      }
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      updateModules(currentCount);
+    }
+
+    window.addEventListener('scroll', function() {
+      let scrollY = window.scrollY;
+      let maxScroll = document.body.scrollHeight - window.innerHeight;
+      let percent = Math.min(scrollY / maxScroll, 1);
+      let newCount = Math.round(startCount - percent * (startCount - minCount));
+      if (newCount !== currentCount && newCount >= minCount && newCount <= startCount) {
+        currentCount = newCount;
+        updateModules(currentCount);
+      }
+    });
+  </script>
+
+</body>
+</html>

@@ -14,12 +14,13 @@
 </head>
 <body>
   <canvas id="c"></canvas>
-  <div style="position: fixed; top: 16px; right: 16px; z-index: 1000;">
-    <label style="color:#fff;"><input type="checkbox" id="toggleControls" checked> Show Controls</label>
-  </div>
   <div id="controlsPanel">
-    <label>Square Size <input id="squareSize" type="range" min="0.05" max="0.45" step="0.01" value="0.40"></label>
-    <span id="squareSizeVal">0.40</span><br>
+    <label style="color:#fff;display:block;margin-bottom:8px;"><input type="checkbox" id="invertSwitch"> Invert Colors</label>
+    <label style="color:#fff;display:block;margin-bottom:8px;"><input type="checkbox" id="greenStrokeSwitch"> Center Square Green Stroke</label>
+    <label>Square Size <input id="squareSize" type="range" min="0.05" max="0.45" step="0.01" value="0.45"></label>
+    <span id="squareSizeVal">0.45</span><br>
+    <label>Grid Count <input id="gridCountSlider" type="range" min="4" max="30" step="1" value="14"></label>
+    <span id="gridCountVal">14</span><br>
     <label>Speed <input id="speedSlider" type="range" min="0.01" max="1.0" step="0.01" value="0.07"></label>
     <span id="speedVal">0.07</span><br>
     <label>Stroke Thickness <input id="strokeSlider" type="range" min="1" max="10" step="1" value="2"></label>
@@ -94,9 +95,10 @@
   window.addEventListener('resize', resize);
   resize();
 
-  let squareMargin = 0.40;
+  let squareMargin = 0.45;
   let animSpeed = 0.05;
   let strokeThickness = 2;
+  let gridCount = 14;
   // Central square color state
   const SQUARE_COLORS = ['#2300d1', '#fa00cc', '#ff0000', '#ff80e3', '#00cfff', '#ffe156', '#06d6a0', '#ff7c43', '#000'];
   let currentSquareColor = SQUARE_COLORS[0];
@@ -124,6 +126,8 @@
   const speedVal = document.getElementById('speedVal');
   const strokeSlider = document.getElementById('strokeSlider');
   const strokeVal = document.getElementById('strokeVal');
+  const gridCountSlider = document.getElementById('gridCountSlider');
+  const gridCountVal = document.getElementById('gridCountVal');
   squareSizeSlider.addEventListener('input', e => {
     squareMargin = parseFloat(e.target.value);
     squareSizeVal.textContent = squareMargin.toFixed(2);
@@ -136,6 +140,10 @@
     strokeThickness = parseInt(e.target.value, 10);
     strokeVal.textContent = strokeThickness;
   });
+  gridCountSlider.addEventListener('input', e => {
+    gridCount = parseInt(e.target.value, 10);
+    gridCountVal.textContent = gridCount;
+  });
 
   let animMode = 'center';
   const animModeRadios = document.getElementsByName('animMode');
@@ -145,19 +153,37 @@
     });
   }
 
-  const toggleControls = document.getElementById('toggleControls');
-  const controlsPanel = document.getElementById('controlsPanel');
-  toggleControls.addEventListener('change', () => {
-    controlsPanel.style.display = toggleControls.checked ? '' : 'none';
+  document.getElementById('invertSwitch').addEventListener('change', function(e) {
+    if (e.target.checked) {
+      document.body.classList.add('inverted');
+    } else {
+      document.body.classList.remove('inverted');
+    }
   });
 
+  document.getElementById('greenStrokeSwitch').addEventListener('change', function(e) {
+    if (e.target.checked) {
+      document.body.classList.add('green-stroke');
+    } else {
+      document.body.classList.remove('green-stroke');
+    }
+  });
+
+  function getBgAndLineColors() {
+    if (document.body.classList.contains('inverted')) {
+      return { bg: '#000', line: '#fff', grid: '#fff' };
+    } else {
+      return { bg: '#fff', line: '#000', grid: '#000' };
+    }
+  }
+
   function animatePerspectiveGrid(time) {
-    ctx.fillStyle = '#fff';
+    const colors = getBgAndLineColors();
+    ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, W, H);
 
     // Use slider value for the central square
     const margin = squareMargin;
-    const gridCount = 14;
 
     // Central square (back wall)
     const sqW = W * (1 - 2 * margin);
@@ -168,9 +194,9 @@
 
     // Draw the central square with current color
     ctx.save();
-    ctx.strokeStyle = '#000';
+    ctx.strokeStyle = document.body.classList.contains('green-stroke') ? '#00ff00' : colors.line;
     ctx.lineWidth = 2;
-    ctx.fillStyle = (animMode === 'center') ? currentSquareColor : '#fff';
+    ctx.fillStyle = (animMode === 'center') ? currentSquareColor : colors.bg;
     ctx.fillRect(sqX, sqY, sqW, sqH);
     ctx.strokeRect(sqX, sqY, sqW, sqH);
     ctx.restore();
@@ -178,7 +204,7 @@
     // Animate the outer grid squares so they appear to move toward the central square in a loop, without overlapping
     ctx.save();
     // Color palette for animated squares
-    let SQUARE_LINE_COLORS = ['#000'];
+    let SQUARE_LINE_COLORS = [colors.grid];
     if (animMode === 'lines') {
       SQUARE_LINE_COLORS = SQUARE_COLORS;
     }
@@ -220,8 +246,7 @@
     // Draw perspective lines from canvas edges to square corners and grid points
     ctx.save();
     ctx.lineWidth = strokeThickness;
-    // All perspective lines black
-    ctx.strokeStyle = '#000';
+    ctx.strokeStyle = colors.line;
     // Top and bottom edges
     for (let i = 0; i <= gridCount; i++) {
       const t = i / gridCount;
