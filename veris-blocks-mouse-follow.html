@@ -36,7 +36,6 @@
     let offsetMovementMode = true; // Always on
     let patternFullScreen = true; // Always full screen
     let darkMode = false;
-    let video;
     let aspectLockMode = false;
 
     function setup() {
@@ -44,9 +43,6 @@
       rectMode(CORNER);
       noStroke();
       background(255);
-      video = createCapture(VIDEO);
-      video.size(32, 24);
-      video.hide();
     }
 
     function draw() {
