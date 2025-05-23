@@ -86,7 +86,7 @@ function setup() {
 function draw() {
   background(0);
   let minGrid = 1;
-  let maxGrid = 50;
+  let maxGrid = 30;
   let scrollMax = document.body.scrollHeight - window.innerHeight;
   let t = scrollMax > 0 ? window.scrollY / scrollMax : 0;
   let grid = round(lerp(maxGrid, minGrid, t));
