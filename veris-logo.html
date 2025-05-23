@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SVG Grid</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 1000vh;
+      width: 100%;
+      background-color: black;
+    }
+    #svg-root {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: repeat(20, 1fr);
+      grid-template-columns: repeat(20, 1fr);
+      gap: 10px;
+      background: black;
+      pointer-events: none;
+    }
+    .svg-cell {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+    }
+    .svg-cell svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      transition: transform 0.1s linear;
+    }
+  </style>
+</head>
+<body>
+  <div id="svg-root"></div>
+  <script>
+    const svgURL = 'assets/1.svg';
+    const root = document.getElementById('svg-root');
+    const cellCenters = [];
+    let svgCells = [];
+    let mouseX = 0, mouseY = 0, needsUpdate = false;
+    let currentAngles = [];
+    let targetAngles = [];
+    let smoothScale = 1;
+    let minScale = 0.2;
+    let maxScale = 2.5;
+    let minGrid = 1;
+    let maxGrid = 30;
+    let targetGridCount = maxGrid;
+    let smoothGridCount = maxGrid;
+    let svgTextCache1 = '';
+    let svgTextCache2 = '';
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function angleDiff(a, b) {
+      let d = b - a;
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      return d;
+    }
+
+    function renderGrid(count) {
+      root.innerHTML = '';
+      root.style.gridTemplateRows = `repeat(${count}, 1fr)`;
+      root.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
+      for (let i = 0; i < count * count; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'svg-cell';
+        // Top-left cell uses 2.svg, others use 1.svg
+        if (i === 0) {
+          cell.innerHTML = svgTextCache2;
+        } else {
+          cell.innerHTML = svgTextCache1;
+        }
+        root.appendChild(cell);
+      }
+      updateCellCenters(count);
+    }
+
+    function updateGridTemplate(count) {
+      root.style.gridTemplateRows = `repeat(${count}, 1fr)`;
+      root.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
+    }
+
+    function updateCellCenters(count = smoothGridCount) {
+      cellCenters.length = 0;
+      svgCells = Array.from(document.querySelectorAll('.svg-cell svg'));
+      const gridRect = root.getBoundingClientRect();
+      const cellW = gridRect.width / count;
+      const cellH = gridRect.height / count;
+      for (let row = 0; row < count; row++) {
+        for (let col = 0; col < count; col++) {
+          const cx = gridRect.left + col * cellW + cellW / 2;
+          const cy = gridRect.top + row * cellH + cellH / 2;
+          cellCenters.push({cx, cy});
+        }
+      }
+      currentAngles = new Array(svgCells.length).fill(0);
+      targetAngles = new Array(svgCells.length).fill(0);
+    }
+
+    Promise.all([
+      fetch('assets/1.svg').then(res => res.text()),
+      fetch('assets/2.svg').then(res => res.text())
+    ])
+      .then(([svg1, svg2]) => {
+        svgTextCache1 = svg1;
+        svgTextCache2 = svg2;
+        renderGrid(maxGrid);
+      })
+      .catch(err => console.error("Failed to load SVGs:", err));
+
+    window.addEventListener('resize', () => updateCellCenters(smoothGridCount));
+
+    let scrollMin = 0;
+    let scrollMax = 1;
+
+    function updateScrollBounds() {
+      scrollMin = 0;
+      scrollMax = document.body.scrollHeight - window.innerHeight;
+    }
+
+    window.addEventListener('resize', updateScrollBounds);
+    window.addEventListener('DOMContentLoaded', updateScrollBounds);
+
+    window.addEventListener('scroll', () => {
+      updateScrollBounds();
+      const scrollY = window.scrollY;
+      const t = scrollMax > 0 ? scrollY / scrollMax : 0;
+      targetGridCount = Math.round(minGrid + (maxGrid - minGrid) * (1 - t));
+    });
+
+    function animate() {
+      // Smoothly interpolate grid count
+      if (Math.abs(smoothGridCount - targetGridCount) > 0.001) {
+        smoothGridCount = lerp(smoothGridCount, targetGridCount, 0.08);
+        updateGridTemplate(smoothGridCount);
+      } else {
+        smoothGridCount = targetGridCount;
+        updateGridTemplate(smoothGridCount);
+      }
+      // If integer grid count changes, re-render grid
+      const roundedGrid = Math.round(smoothGridCount);
+      if (roundedGrid !== svgCells.length ** 0.5) {
+        renderGrid(roundedGrid);
+      }
+      if (svgCells.length === cellCenters.length) {
+        // Cache mouse position for all cells
+        const dxs = new Array(svgCells.length);
+        const dys = new Array(svgCells.length);
+        for (let i = 0; i < svgCells.length; i++) {
+          const {cx, cy} = cellCenters[i];
+          dxs[i] = mouseX - cx;
+          dys[i] = mouseY - cy;
+        }
+        // Only update transforms if the angle actually changes significantly
+        for (let i = 0; i < svgCells.length; i++) {
+          let target;
+          if (i === 0) {
+            target = Math.atan2(dys[i], dxs[i]) * 180 / Math.PI + 90;
+          } else {
+            target = Math.atan2(dxs[i], -dys[i]) * 180 / Math.PI;
+          }
+          if (typeof targetAngles[i] === 'undefined') targetAngles[i] = target;
+          targetAngles[i] = target;
+          if (typeof currentAngles[i] === 'undefined') currentAngles[i] = target;
+          let diff = angleDiff(currentAngles[i], targetAngles[i]);
+          // Only update if angle changes more than 0.1 degree
+          if (Math.abs(diff) > 0.1) {
+            currentAngles[i] = lerp(currentAngles[i], currentAngles[i] + diff, 0.08);
+            let angleToApply = currentAngles[i];
+            if (i === 0) {
+              angleToApply = Math.max(-45, Math.min(45, angleToApply));
+            }
+            svgCells[i].style.transform = `rotate(${angleToApply}deg)`;
+            svgCells[i].style.transformOrigin = '50% 50%';
+          }
+        }
+      }
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+
+    document.addEventListener('mousemove', e => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+      needsUpdate = true;
+    });
+  </script>
+</body>
+</html>

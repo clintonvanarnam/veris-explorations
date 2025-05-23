@@ -59,30 +59,11 @@
     let rectOffset = .25; // <--- CONTROL THIS VARIABLE TO ADJUST RECTANGLE OFFSET (0.4 = 40% of width/height)
     let mouseMagnetStrength = 100; // <--- CONTROL THIS VARIABLE TO ADJUST MOUSE MAGNET REPULSION (was maxRepel)
     let showBlackTop = false; // Press 'b' to toggle black square on top
+    let gridMode = false; // Press 'g' to toggle grid layout
+    let patternMode = true; // Patterns are now default
+    let hoffmanMode = false; // Press 'h' to toggle Armin Hofmann style pattern
     let camInputMode = false; // Press 'i' to use camera data for stroke weight
-    let darkMode = false; // Press 'd' to toggle dark mode
-    let maxCornerRadius = 2; // Maximum corner radius for rectangles
-    let variationMode = 0; // 0 = off, 1 = pattern 1, 2 = pattern 2, ...
-    let patternVariations = [];
-    let variationType = 0; // Cycles through different rhythmic types
-    const VARIATION_TYPES = 7; // Number of pattern types
-    const VARIATION_NAMES = [
-      'Horizontal Wave',
-      'Checkerboard',
-      'Diagonal Wave',
-      'Vertical Stripes',
-      'Concentric Rings',
-      'Grid Pulse',
-      'Random Clusters'
-    ];
-    let patternRectWidthRatio = 0.7; // Controls width of rectangles in pattern mode
-    let patternRectHeightRatio = 0.5; // Controls height of rectangles in pattern mode
-    let patternRowSpacing = 1; // Controls vertical spacing between rows (1 = default, <1 = closer)
-    let patternColSpacing = 1; // Controls horizontal spacing between columns (1 = default, <1 = closer)
     let video;
-    let offsetMovementMode = false; // Press 'm' to toggle rhythmic offset movement
-    let patternFullScreen = false; // If true, pattern fills the whole canvas
-    let opacityGradientMode = false; // Press 'o' to toggle vertical opacity gradient
 
     function setup() {
       createCanvas(windowWidth, windowHeight);
@@ -120,135 +101,42 @@
       }
     }
 
+    // Update wandering motion to use Perlin noise-based wind-like movement
     function draw() {
-      // Only pattern mode remains
-      if (darkMode) {
-        background(0);
-      } else {
-        background(255);
-      }
-      let t = millis() * 0.001;
-      let patternX = patternFullScreen ? 0 : width / 2;
-      let patternW = patternFullScreen ? width : width / 2;
-      // Pattern mode only
-      let bestCols = 1;
-      let bestRows = 1;
-      let minDiff = Infinity;
-      for (let rows = 1; rows <= currentCount; rows++) {
-        let cols = ceil(currentCount / rows);
-        let gridAspect = (cols / rows) * (height / patternW);
-        let diff = abs(gridAspect - 1);
-        if (cols * rows >= currentCount && diff < minDiff) {
-          minDiff = diff;
-          bestCols = cols;
-          bestRows = rows;
-        }
-      }
-      let cols = bestCols;
-      let rows = bestRows;
-      let colSpacingPx = patternColSpacing * 8;
-      let rowSpacingPx = patternRowSpacing * 8;
-      let gridW = (patternW - colSpacingPx * (cols - 1)) / cols;
-      let gridH = (height - rowSpacingPx * (rows - 1)) / rows;
-      let totalGridW = cols * gridW + (cols - 1) * colSpacingPx;
-      let totalGridH = rows * gridH + (rows - 1) * rowSpacingPx;
-      let offsetX = patternX + (patternW - totalGridW) / 2;
-      let offsetY = (height - totalGridH) / 2;
-      if (camInputMode) video.loadPixels();
-      // Generate rhythmic pattern variations if variationMode is on
-      if (variationMode > 0) {
-        patternVariations = [];
-        for (let row = 0; row < rows; row++) {
-          for (let col = 0; col < cols; col++) {
-            let idx = row * cols + col;
-            let rwRatio, rhRatio;
-            if (variationType === 0) {
-              // Horizontal sinusoidal wave
-              rwRatio = 0.7 + 0.25 * sin(TWO_PI * col / cols + row * 0.5);
-              rhRatio = 0.5 + 0.2 * cos(TWO_PI * row / rows + col * 0.5);
-            } else if (variationType === 1) {
-              // Checkerboard modulation
-              let checker = ((row + col) % 2 === 0) ? 1 : -1;
-              rwRatio = 0.7 + 0.2 * checker;
-              rhRatio = 0.5 + 0.15 * checker;
-            } else if (variationType === 2) {
-              // Diagonal wave
-              let diag = (row + col) / (rows + cols);
-              rwRatio = 0.5 + 0.4 * sin(TWO_PI * diag);
-              rhRatio = 0.4 + 0.3 * cos(TWO_PI * diag);
-            } else if (variationType === 3) {
-              // Vertical stripes
-              rwRatio = 0.6 + 0.35 * sin(TWO_PI * col / cols);
-              rhRatio = 0.5 + 0.1 * cos(TWO_PI * col / cols);
-            } else if (variationType === 4) {
-              // Concentric rings (distance from center)
-              let cx = cols / 2, cy = rows / 2;
-              let distNorm = dist(col, row, cx, cy) / max(cx, cy);
-              rwRatio = 0.7 - 0.3 * distNorm + 0.1 * sin(TWO_PI * distNorm);
-              rhRatio = 0.5 - 0.2 * distNorm + 0.1 * cos(TWO_PI * distNorm);
-            } else if (variationType === 5) {
-              // Grid pulse (modulate by row and col together)
-              rwRatio = 0.7 + 0.2 * sin(TWO_PI * row / rows + col / cols);
-              rhRatio = 0.5 + 0.2 * cos(TWO_PI * row / rows - col / cols);
-            } else if (variationType === 6) {
-              // Random clusters (blocky randomness)
-              let blockSize = 2 + floor(random(1, 4));
-              let blockRow = floor(row / blockSize);
-              let blockCol = floor(col / blockSize);
-              let base = noise(blockRow * 0.7, blockCol * 0.7);
-              rwRatio = 0.5 + 0.4 * base;
-              rhRatio = 0.4 + 0.3 * base;
-            }
-            patternVariations.push({ rwRatio, rhRatio });
-          }
-        }
-      }
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          let i = row * cols + col;
-          let gx = col * (gridW + colSpacingPx) + offsetX;
-          let gy = row * (gridH + rowSpacingPx) + offsetY;
-          let angle = 0;
-          if (offsetMovementMode) {
-            // Angle points from cell center to mouse
-            let cx = gx + gridW / 2;
-            let cy = gy + gridH / 2;
-            angle = atan2(mouseY - cy, mouseX - cx);
-          }
-          let alpha = 255;
-          if (opacityGradientMode) {
-            alpha = lerp(0, 255, row / (rows - 1));
-          }
-          push();
+      background(255); // Set white background for p5.js canvas
+      let t = millis() * 0.0002;
+      // Only draw patterns on the right 1/2 of the canvas
+      let patternX = width / 2; // Start at 1/2 of the width
+      let patternW = width / 2; // Cover 1/2 of the width
+      if (patternMode) {
+        let cols = ceil(sqrt(modules.length * (patternW / height)));
+        let rows = ceil(modules.length / cols);
+        let gridW = patternW / cols;
+        let gridH = height / rows;
+        let totalGridW = cols * gridW;
+        let totalGridH = rows * gridH;
+        let offsetX = patternX + (patternW - totalGridW) / 2;
+        let offsetY = (height - totalGridH) / 2;
+        if (camInputMode) video.loadPixels();
+        for (let i = 0; i < modules.length; i++) {
+          let m = modules[i];
+          let col = i % cols;
+          let row = floor(i / cols);
+          let gx = col * gridW + offsetX;
+          let gy = row * gridH + offsetY;
+          push();d
           translate(gx, gy);
-          if (offsetMovementMode) {
-            translate(gridW / 2, gridH / 2);
-            rotate(angle);
-            translate(-gridW / 2, -gridH / 2);
-          }
-          let rwRatio, rhRatio;
-          if (variationMode > 0 && patternVariations[i]) {
-            rwRatio = patternVariations[i].rwRatio;
-            rhRatio = patternVariations[i].rhRatio;
-          } else {
-            rwRatio = patternRectWidthRatio;
-            rhRatio = patternRectHeightRatio;
-          }
-          let rw = gridW * rwRatio;
-          let rh = gridH * rhRatio;
-          let cornerRadius = min(maxCornerRadius, min(rw, rh) * 0.25);
-          // Back rectangle
-          let backFill = darkMode ? color(0, alpha) : color(255, alpha);
-          let backStroke = darkMode ? color(255, alpha) : color(0, alpha);
-          fill(backFill);
-          stroke(backStroke);
+          let rw = gridW * 0.8;
+          let rh = gridH * 0.8;
+          // Back rectangle: black stroke
+          fill(255);
+          stroke(0);
           strokeWeight(1);
-          rect((gridW - rw) / 2 + rw * rectOffset, (gridH - rh) / 2 - rh * rectOffset, rw, rh, cornerRadius);
-          // Front rectangle
-          let frontFill = darkMode ? color(0, alpha) : color(255, alpha);
-          fill(frontFill);
+          rect((gridW - rw) / 2 + rw * rectOffset, (gridH - rh) / 2 + rh * rectOffset, rw, rh);
+          // Front rectangle: green stroke, strokeWeight from camera if enabled
+          fill(255);
           let sw = 2;
-          if (camInputMode && video.pixels.length > 0 && i < currentCount) {
+          if (camInputMode && video.pixels.length > 0) {
             let x = floor(map(col, 0, cols-1, 0, video.width-1));
             let y = floor(map(row, 0, rows-1, 0, video.height-1));
             let idx = 4 * (y * video.width + x);
@@ -256,52 +144,170 @@
             let g = video.pixels[idx+1];
             let b = video.pixels[idx+2];
             let bright = (r + g + b) / 3;
-            sw = map(bright, 0, 255, 5, 1);
+            sw = map(bright, 0, 255, 5, 1); // Darker = thicker
           }
-          let greenStroke = color(0, 128, 0, alpha); // green with alpha
-          stroke(greenStroke);
+          stroke('green');
           strokeWeight(sw);
-          rect((gridW - rw) / 2, (gridH - rh) / 2, rw, rh, cornerRadius);
+          rect((gridW - rw) / 2, (gridH - rh) / 2, rw, rh);
+          pop();
+        }
+      } else if (hoffmanMode) {
+        let patternX = width / 2;
+        let patternW = width / 2;
+        let cols = ceil(sqrt(modules.length * (patternW / height)));
+        let rows = ceil(modules.length / cols);
+        let gridW = patternW / cols;
+        let gridH = height / rows;
+        let totalGridW = cols * gridW;
+        let totalGridH = rows * gridH;
+        let offsetX = patternX + (patternW - totalGridW) / 2;
+        let offsetY = (height - totalGridH) / 2;
+        for (let i = 0; i < modules.length; i++) {
+          let col = i % cols;
+          let row = floor(i / cols);
+          let gx = col * gridW + offsetX;
+          let gy = row * gridH + offsetY;
+          push();
+          translate(gx, gy);
+          let rw = gridW * 0.9;
+          let rh = gridH * 0.9;
+          if ((col + row) % 2 === 0) {
+            fill(0);
+          } else {
+            fill(255);
+          }
+          noStroke();
+          rect((gridW - rw) / 2, (gridH - rh) / 2, rw, rh);
+          if ((col + row) % 2 === 0) {
+            fill(255);
+            noStroke();
+            triangle(
+              (gridW - rw) / 2, (gridH - rh) / 2 + rh,
+              (gridW - rw) / 2 + rw, (gridH - rh) / 2 + rh,
+              (gridW - rw) / 2 + rw, (gridH - rh) / 2
+            );
+          } else {
+            fill(0);
+            noStroke();
+            ellipse(
+              (gridW) / 2,
+              (gridH) / 2,
+              rw * 0.5,
+              rh * 0.5
+            );
+          }
+          pop();
+        }
+      } else if (gridMode) {
+        let patternX = width / 2;
+        let patternW = width / 2;
+        let cols = ceil(sqrt(modules.length * (patternW / height)));
+        let rows = ceil(modules.length / cols);
+        let gridW = patternW / cols;
+        let gridH = height / rows;
+        let totalGridW = cols * gridW;
+        let totalGridH = rows * gridH;
+        let offsetX = patternX + (patternW - totalGridW) / 2;
+        let offsetY = (height - totalGridH) / 2;
+        for (let i = 0; i < modules.length; i++) {
+          let m = modules[i];
+          let col = i % cols;
+          let row = floor(i / cols);
+          let gx = col * gridW + offsetX;
+          let gy = row * gridH + offsetY;
+          push();
+          translate(gx, gy);
+          if (showBlackTop) {
+            fill(255);
+            stroke(0);
+            strokeWeight(1);
+            rect(m.rw * rectOffset, m.rh * rectOffset, m.rw, m.rh);
+            fill(0);
+            stroke('green');
+            strokeWeight(2);
+            rect(0, 0, m.rw, m.rh);
+          } else {
+            fill(255);
+            stroke(0);
+            strokeWeight(1);
+            rect(m.rw * rectOffset, m.rh * rectOffset, m.rw, m.rh);
+            fill(255);
+            stroke('green');
+            strokeWeight(2);
+            rect(0, 0, m.rw, m.rh);
+          }
+          pop();
+        }
+      } else {
+        let patternX = width / 2;
+        let patternW = width / 2;
+        for (let i = 0; i < modules.length; i++) {
+          let m = modules[i];
+          let t = millis() * 0.0002;
+          let windAngle = noise(i * 0.2, t) * TWO_PI * 2;
+          let windSpeed = 2.5 + noise(i * 0.2 + 100, t + 100) * 2.5;
+          m.x += cos(windAngle) * windSpeed * windSpeedMultiplier;
+          m.y += sin(windAngle) * windSpeed * windSpeedMultiplier;
+          if (m.x < 0) m.x = 0;
+          if (m.x > patternW - m.rw) m.x = patternW - m.rw;
+          if (m.y < 0) m.y = 0;
+          if (m.y > height - m.rh) m.y = height - m.rh;
+          push();
+          translate(m.x + patternX, m.y);
+          let cx = m.rw / 2;
+          let cy = m.rh / 2;
+          let globalX = m.x + cx;
+          let globalY = m.y + cy;
+          let dx = mouseX - (globalX + patternX);
+          let dy = mouseY - globalY;
+          let dist = sqrt(dx*dx + dy*dy);
+          let repelDist = 120;
+          let attractStrength = constrain((repelDist - dist) / repelDist, 0, 1) * mouseMagnetStrength * 0.01;
+          let offsetX = 0;
+          let offsetY = 0;
+          if (attractStrength > 0) {
+            offsetX = dx * attractStrength;
+            offsetY = dy * attractStrength;
+          }
+          if (showBlackTop) {
+            fill(255);
+            stroke(0);
+            strokeWeight(1);
+            rect(m.rw * rectOffset + offsetX, m.rh * rectOffset + offsetY, m.rw, m.rh);
+            fill(0);
+            stroke('green');
+            strokeWeight(2);
+            rect(offsetX, offsetY, m.rw, m.rh);
+          } else {
+            fill(255);
+            stroke(0);
+            strokeWeight(1);
+            rect(m.rw * rectOffset + offsetX, m.rh * rectOffset + offsetY, m.rw, m.rh);
+            fill(255);
+            stroke('green');
+            strokeWeight(2);
+            rect(offsetX, offsetY, m.rw, m.rh);
+          }
           pop();
         }
       }
     }
 
     function keyPressed() {
-      if (key === '2') {
-        variationMode = (variationMode + 1) % (VARIATION_TYPES + 1); // 0 = off, 1 = type1, 2 = type2, ...
-        if (variationMode === 0) {
-          variationType = 0;
-          patternVariations = [];
-          console.log('Pattern: Default');
-        } else {
-          variationType = (variationMode - 1) % VARIATION_TYPES;
-          patternVariations = [];
-          console.log('Pattern:', VARIATION_NAMES[variationType]);
-        }
+      if (key === 'b' || key === 'B') {
+        showBlackTop = !showBlackTop;
       }
-      if (key === 'm' || key === 'M') {
-        offsetMovementMode = !offsetMovementMode;
-        console.log('Offset Movement:', offsetMovementMode ? 'ON' : 'OFF');
+      if (key === 'g' || key === 'G') {
+        gridMode = !gridMode;
       }
-      if (key === 'f' || key === 'F') {
-        let fs = fullscreen();
-        fullscreen(!fs);
-        patternFullScreen = !patternFullScreen;
-        setTimeout(() => {
-          resizeCanvas(windowWidth, windowHeight);
-          updateModules(currentCount);
-        }, 100);
+      if (key === 'p' || key === 'P') {
+        patternMode = !patternMode;
       }
-      if (key === 'd' || key === 'D') {
-        darkMode = !darkMode;
+      if (key === 'h' || key === 'H') {
+        hoffmanMode = !hoffmanMode;
       }
       if (key === 'i' || key === 'I') {
         camInputMode = !camInputMode;
-      }
-      if (key === 'o' || key === 'O') {
-        opacityGradientMode = !opacityGradientMode;
-        console.log('Opacity Gradient:', opacityGradientMode ? 'ON' : 'OFF');
       }
     }
 
