@@ -2,152 +2,144 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Veris SVG Grid</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Veris Mouse Follow Grid</title>
   <style>
-    html, body {
+    body, html {
       margin: 0;
       padding: 0;
       height: 1000vh;
-      background: black;
-      overflow: hidden;
     }
-
-    svg {
+    canvas {
       position: fixed;
       top: 0;
       left: 0;
-      pointer-events: none;
       z-index: 1;
+      pointer-events: auto;
     }
   </style>
 </head>
 <body>
-  <!-- Load libraries -->
- <!-- Load p5 core library -->
-<script src="https://cdn.jsdelivr.net/npm/p5@1.4.2/lib/p5.min.js"></script>
-
-<!-- Load p5.js-svg renderer from a known working version -->
-<script src="https://cdn.jsdelivr.net/npm/p5.js-svg@1.1.1/dist/p5.svg.min.js"></script>
-
-  <!-- Your sketch -->
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.4.2/lib/p5.min.js"></script>
   <script>
+    let startCount = 500;
+    let minCount = 1;
+    let currentCount = startCount;
+    let scrollStep = (startCount - minCount) / window.innerHeight;
+    let sizeScale = 8;
+    let rectOffset = .25;
+    let maxCornerRadius = 2;
+    let patternRectWidthRatio = 0.7;
+    let patternRectHeightRatio = 0.5;
+    let patternRowSpacing = 1;
+    let patternColSpacing = 1;
+    let offsetMovementMode = true; // Always on
+    let patternFullScreen = true; // Always full screen
+    let darkMode = false;
+    let aspectLockMode = false;
 
-let svgGraphic;
-let cellPositions = [];
-let startCount = 100;
-let minCount = 1;
-let currentCount = startCount;
-
-let patternRectWidthRatio = 1;
-let patternRectHeightRatio = 146 / 419;
-let patternRowSpacing = 1;
-let patternColSpacing = 1;
-
-function preload() {
-  svgGraphic = loadSVG("assets/1.svg");
-}
-
-function setup() {
-  createCanvas(windowWidth, windowHeight, SVG);
-  noFill();
-  noLoop(); // We’ll redraw manually on mouse move or scroll
-  updateGrid();
-}
-
-function updateGrid() {
-  cellPositions = [];
-
-  let bestCols = 1;
-  let bestRows = 1;
-  let minDiff = Infinity;
-  for (let rows = 1; rows <= currentCount; rows++) {
-    let cols = ceil(currentCount / rows);
-    let gridAspect = (cols / rows) * (height / width);
-    let diff = abs(gridAspect - 1);
-    if (cols * rows >= currentCount && diff < minDiff) {
-      minDiff = diff;
-      bestCols = cols;
-      bestRows = rows;
-    }
-  }
-
-  let cols = bestCols;
-  let rows = bestRows;
-  let colSpacingPx = patternColSpacing * 8;
-  let rowSpacingPx = patternRowSpacing * 8;
-  let gridW = (width - colSpacingPx * (cols - 1)) / cols;
-  let gridH = (height - rowSpacingPx * (rows - 1)) / rows;
-  let totalGridW = cols * gridW + (cols - 1) * colSpacingPx;
-  let totalGridH = rows * gridH + (rows - 1) * rowSpacingPx;
-  let offsetX = (width - totalGridW) / 2;
-  let offsetY = (height - totalGridH) / 2;
-
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      let gx = col * (gridW + colSpacingPx) + offsetX;
-      let gy = row * (gridH + rowSpacingPx) + offsetY;
-      cellPositions.push({ x: gx, y: gy, w: gridW, h: gridH });
-    }
-  }
-
-  redraw();
-}
-
-function draw() {
-  clear();
-  for (let cell of cellPositions) {
-    const { x, y, w, h } = cell;
-    let cx = x + w / 2;
-    let cy = y + h / 2;
-    let angle = atan2(mouseY - cy, mouseX - cx);
-
-    push();
-    translate(cx, cy);
-    rotate(angle);
-
-    let svgW = 472;
-    let svgH = 188;
-    let svgAspect = svgW / svgH;
-    let cellAspect = w / h;
-    let drawW, drawH;
-    if (cellAspect > svgAspect) {
-      drawH = h;
-      drawW = svgAspect * drawH;
-    } else {
-      drawW = w;
-      drawH = drawW / svgAspect;
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      rectMode(CORNER);
+      noStroke();
+      background(255);
     }
 
-    // Instead of shape(), use image() for SVG fallback if shape is not defined
-    if (typeof shape === 'function') {
-      shape(svgGraphic, -drawW / 2, -drawH / 2, drawW, drawH);
-    } else {
-      image(svgGraphic, -drawW / 2, -drawH / 2, drawW, drawH);
+    function draw() {
+      background(darkMode ? 0 : 255);
+      let patternX = 0;
+      let patternW = width;
+      let bestCols = 1;
+      let bestRows = 1;
+      let minDiff = Infinity;
+      for (let rows = 1; rows <= currentCount; rows++) {
+        let cols = ceil(currentCount / rows);
+        let gridAspect = (cols / rows) * (height / patternW);
+        let diff = abs(gridAspect - 1);
+        if (cols * rows >= currentCount && diff < minDiff) {
+          minDiff = diff;
+          bestCols = cols;
+          bestRows = rows;
+        }
+      }
+      let cols = bestCols;
+      let rows = bestRows;
+      let colSpacingPx = patternColSpacing * 8;
+      let rowSpacingPx = patternRowSpacing * 8;
+      let gridW = (patternW - colSpacingPx * (cols - 1)) / cols;
+      let gridH = (height - rowSpacingPx * (rows - 1)) / rows;
+      let totalGridW = cols * gridW + (cols - 1) * colSpacingPx;
+      let totalGridH = rows * gridH + (rows - 1) * rowSpacingPx;
+      let offsetX = patternX + (patternW - totalGridW) / 2;
+      let offsetY = (height - totalGridH) / 2;
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          let i = row * cols + col;
+          let gx = col * (gridW + colSpacingPx) + offsetX;
+          let gy = row * (gridH + rowSpacingPx) + offsetY;
+          // Mouse-following rotation
+          let cx = gx + gridW / 2;
+          let cy = gy + gridH / 2;
+          let angle = atan2(mouseY - cy, mouseX - cx);
+          push();
+          translate(gx, gy);
+          translate(gridW / 2, gridH / 2);
+          rotate(angle);
+          translate(-gridW / 2, -gridH / 2);
+          let rw = gridW * patternRectWidthRatio;
+          let rh = gridH * patternRectHeightRatio;
+          let cornerRadius = min(maxCornerRadius, min(rw, rh) * 0.25);
+          fill(darkMode ? 0 : 255);
+          stroke(darkMode ? 255 : 0);
+          strokeWeight(1);
+          rect((gridW - rw) / 2 + rw * rectOffset, (gridH - rh) / 2 - rh * rectOffset, rw, rh, cornerRadius);
+          fill(darkMode ? 0 : 255);
+          stroke('#008000');
+          strokeWeight(2);
+          rect((gridW - rw) / 2, (gridH - rh) / 2, rw, rh, cornerRadius);
+          pop();
+        }
+      }
     }
-    pop();
-  }
-}
 
-function mouseMoved() {
-  redraw(); // Manually trigger
-}
+    function keyPressed() {
+      if (key === 'd' || key === 'D') {
+        darkMode = !darkMode;
+      }
+      if (key === 'a' || key === 'A') {
+        aspectLockMode = !aspectLockMode;
+        if (aspectLockMode) {
+          // Lock to 419:146 aspect ratio, fit largest possible inside cell
+          let aspect = 419 / 146;
+          // We'll set widthRatio and heightRatio so that max(widthRatio, heightRatio) == 1
+          if (aspect > 1) {
+            patternRectWidthRatio = 1;
+            patternRectHeightRatio = 1 / aspect;
+          } else {
+            patternRectWidthRatio = aspect;
+            patternRectHeightRatio = 1;
+          }
+        } else {
+          // Restore to default
+          patternRectWidthRatio = 0.7;
+          patternRectHeightRatio = 0.5;
+        }
+      }
+    }
 
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  updateGrid();
-}
+    window.addEventListener('scroll', function() {
+      let scrollY = window.scrollY;
+      let maxScroll = document.body.scrollHeight - window.innerHeight;
+      let percent = Math.min(scrollY / maxScroll, 1);
+      let newCount = Math.round(startCount - percent * (startCount - minCount));
+      if (newCount !== currentCount && newCount >= minCount && newCount <= startCount) {
+        currentCount = newCount;
+      }
+    });
 
-window.addEventListener('scroll', () => {
-  let scrollY = window.scrollY;
-  let maxScroll = document.body.scrollHeight - window.innerHeight;
-  let percent = Math.min(scrollY / maxScroll, 1);
-  let newCount = Math.round(startCount - percent * (startCount - minCount));
-  if (newCount !== currentCount) {
-    currentCount = newCount;
-    updateGrid();
-  }
-});
-
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
   </script>
 </body>
 </html>

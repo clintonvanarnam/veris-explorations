@@ -24,6 +24,7 @@
       gap: 10px;
       background: black;
       pointer-events: none;
+      transition: grid-template-rows 0.4s cubic-bezier(0.4,0,0.2,1), grid-template-columns 0.4s cubic-bezier(0.4,0,0.2,1);
     }
     .svg-cell {
       width: 100%;
@@ -32,6 +33,7 @@
       align-items: center;
       justify-content: center;
       background: transparent;
+      transition: width 0.4s cubic-bezier(0.4,0,0.2,1), height 0.4s cubic-bezier(0.4,0,0.2,1);
     }
     .svg-cell svg {
       width: 100%;
@@ -76,16 +78,28 @@
       root.innerHTML = '';
       root.style.gridTemplateRows = `repeat(${count}, 1fr)`;
       root.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
-      for (let i = 0; i < count * count; i++) {
+      const total = count * count;
+      let topLeftCell = null;
+      for (let i = 0; i < total; i++) {
         const cell = document.createElement('div');
         cell.className = 'svg-cell';
-        // Top-left cell uses 2.svg, others use 1.svg
         if (i === 0) {
           cell.innerHTML = svgTextCache2;
+          cell.style.zIndex = '2'; // ensure on top
+          cell.style.position = 'relative';
+          topLeftCell = cell;
         } else {
           cell.innerHTML = svgTextCache1;
+          cell.style.zIndex = '1';
+          cell.style.position = 'relative';
         }
         root.appendChild(cell);
+      }
+      // Ensure top-left cell is both first in DOM (for grid) and on top (z-index)
+      if (topLeftCell) {
+        // Remove and re-insert as first child only
+        root.removeChild(topLeftCell);
+        root.insertBefore(topLeftCell, root.firstChild);
       }
       updateCellCenters(count);
     }
@@ -108,8 +122,16 @@
           cellCenters.push({cx, cy});
         }
       }
-      currentAngles = new Array(svgCells.length).fill(0);
-      targetAngles = new Array(svgCells.length).fill(0);
+      // Only grow the angle arrays, never reset them
+      if (currentAngles.length < svgCells.length) {
+        const oldLen = currentAngles.length;
+        currentAngles.length = svgCells.length;
+        targetAngles.length = svgCells.length;
+        for (let i = oldLen; i < svgCells.length; i++) {
+          currentAngles[i] = 0;
+          targetAngles[i] = 0;
+        }
+      }
     }
 
     Promise.all([
@@ -169,22 +191,38 @@
         // Only update transforms if the angle actually changes significantly
         for (let i = 0; i < svgCells.length; i++) {
           let target;
-          if (i === 0) {
-            target = Math.atan2(dys[i], dxs[i]) * 180 / Math.PI + 90;
-          } else {
-            target = Math.atan2(dxs[i], -dys[i]) * 180 / Math.PI;
-          }
+          // Make all cells point down at the mouse
+          target = Math.atan2(-dxs[i], dys[i]) * 180 / Math.PI;
           if (typeof targetAngles[i] === 'undefined') targetAngles[i] = target;
           targetAngles[i] = target;
           if (typeof currentAngles[i] === 'undefined') currentAngles[i] = target;
-          let diff = angleDiff(currentAngles[i], targetAngles[i]);
-          // Only update if angle changes more than 0.1 degree
-          if (Math.abs(diff) > 0.1) {
-            currentAngles[i] = lerp(currentAngles[i], currentAngles[i] + diff, 0.08);
-            let angleToApply = currentAngles[i];
-            if (i === 0) {
-              angleToApply = Math.max(-45, Math.min(45, angleToApply));
+        }
+        // Compute average rotation (excluding 2.svg)
+        let sum = 0, countAvg = 0;
+        for (let i = 1; i < svgCells.length; i++) {
+          sum += targetAngles[i];
+          countAvg++;
+        }
+        let avgAngle = countAvg > 0 ? sum / countAvg : 0;
+        // Only update transforms if the angle actually changes significantly
+        for (let i = 0; i < svgCells.length; i++) {
+          let diff;
+          let angleToApply;
+          if (i === 0) {
+            // 2.svg uses the average angle, clamped
+            diff = angleDiff(currentAngles[i], avgAngle);
+            if (Math.abs(diff) > 0.1) {
+              currentAngles[i] = lerp(currentAngles[i], currentAngles[i] + diff, 0.08);
             }
+            angleToApply = Math.max(-45, Math.min(45, currentAngles[i]));
+          } else {
+            diff = angleDiff(currentAngles[i], targetAngles[i]);
+            if (Math.abs(diff) > 0.1) {
+              currentAngles[i] = lerp(currentAngles[i], currentAngles[i] + diff, 0.08);
+            }
+            angleToApply = currentAngles[i];
+          }
+          if (svgCells[i]) {
             svgCells[i].style.transform = `rotate(${angleToApply}deg)`;
             svgCells[i].style.transformOrigin = '50% 50%';
           }
