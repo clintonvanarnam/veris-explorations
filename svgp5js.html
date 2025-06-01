@@ -12,6 +12,13 @@
       height: 1000vh;
       width: 100vw;
       background: black;
+      /* Hide scrollbar visually but allow scrolling */
+      overflow-y: scroll;
+      scrollbar-width: none; /* Firefox */
+    }
+    /* Hide scrollbar for Webkit browsers */
+    body::-webkit-scrollbar, html::-webkit-scrollbar {
+      display: none;
     }
     canvas {
       position: fixed;
@@ -20,14 +27,15 @@
       z-index: 1;
       pointer-events: auto;
     }
+    body, html, canvas {
+      cursor: none;
+    }
   </style>
 </head>
 <body>
 <script>
 let svgElements1 = [];
 let svgViewBox1 = [0, 0, 472, 188];
-let svgElements2 = [];
-let svgViewBox2 = [0, 0, 472, 188];
 function preload() {
   // Parse 1.svg
   loadStrings('assets/1.svg', data => {
@@ -54,51 +62,46 @@ function preload() {
     const vb = svgText.match(/viewBox="([^"]+)"/);
     if (vb) svgViewBox1 = vb[1].split(/\s+/).map(Number);
   });
-  // Parse 2.svg
-  loadStrings('assets/2.svg', data => {
-    const svgText = data.join('');
-    // Parse rects
-    const rects = [...svgText.matchAll(/<rect ([^>]*)\/>/g)];
-    for (const r of rects) {
-      const attrs = {};
-      for (const m of r[1].matchAll(/([a-zA-Z\-]+)="([^"]+)"/g)) {
-        attrs[m[1]] = m[2];
-      }
-      svgElements2.push({type: 'rect', attrs});
-    }
-    // Parse paths
-    const paths = [...svgText.matchAll(/<path ([^>]*)\/>/g)];
-    for (const p of paths) {
-      const attrs = {};
-      for (const m of p[1].matchAll(/([a-zA-Z\-]+)="([^"]+)"/g)) {
-        attrs[m[1]] = m[2];
-      }
-      svgElements2.push({type: 'path', attrs});
-    }
-    // Parse viewBox if present
-    const vb = svgText.match(/viewBox="([^"]+)"/);
-    if (vb) svgViewBox2 = vb[1].split(/\s+/).map(Number);
-  });
 }
 function setup() {
   createCanvas(windowWidth, windowHeight);
 }
+// Animation and scroll speed variables
+let finalCellAngle = 0; // For animating the last cell
+let finalCellAngleTarget = 0;
+let finalCellAngleStart = 0.3; // radians, initial offset
+let finalCellEasing = 0.03; // Easing for SVG rotation at end
+let scrollToBottomDuration = 4000; // ms, duration for scroll-to-bottom
+let gridPadding = 60; // px, padding around the grid
+let lastGrid = -1;
 function draw() {
   background(0);
   let minGrid = 1;
-  let maxGrid = 30;
+  let maxGrid = 20;
   let scrollMax = document.body.scrollHeight - window.innerHeight;
   let t = scrollMax > 0 ? window.scrollY / scrollMax : 0;
   let grid = round(lerp(maxGrid, minGrid, t));
-  let cellW = width / grid;
-  let cellH = height / grid;
-  // Draw all cells except (0,0)
+  // Calculate available area for grid
+  let availW = width - 2 * gridPadding;
+  let availH = height - 2 * gridPadding;
+  let cellW = availW / grid;
+  let cellH = availH / grid;
+  // Draw all cells including (0,0) with svgElements1
   for (let row = 0; row < grid; row++) {
     for (let col = 0; col < grid; col++) {
-      if (row === 0 && col === 0) continue; // skip top-left for now
-      let cx = col * cellW + cellW / 2;
-      let cy = row * cellH + cellH / 2;
-      let angle = atan2(mouseY - cy, mouseX - cx);
+      let cx = gridPadding + col * cellW + cellW / 2;
+      let cy = gridPadding + row * cellH + cellH / 2;
+      let angle;
+      if (grid === 1 && row === 0 && col === 0) {
+        // Animate from offset to straight for the last cell
+        if (lastGrid !== 1) {
+          finalCellAngle = finalCellAngleStart;
+        }
+        finalCellAngle = lerp(finalCellAngle, 0, finalCellEasing);
+        angle = finalCellAngle;
+      } else {
+        angle = atan2(mouseY - cy, mouseX - cx);
+      }
       push();
       translate(cx, cy);
       rotate(angle);
@@ -111,22 +114,7 @@ function draw() {
       pop();
     }
   }
-  // Draw (0,0) cell last so it's always on top
-  if (grid > 0) {
-    let cx = cellW / 2;
-    let cy = cellH / 2;
-    let angle = atan2(mouseY - cy, mouseX - cx);
-    push();
-    translate(cx, cy);
-    rotate(angle);
-    let elements = svgElements2;
-    let viewBox = svgViewBox2;
-    let scaleFactor = 0.9 * min(cellW / viewBox[2], cellH / viewBox[3]);
-    scale(scaleFactor);
-    translate(-viewBox[2]/2, -viewBox[3]/2);
-    drawSVGElements(elements);
-    pop();
-  }
+  lastGrid = grid;
 }
 function drawSVGElements(elements) {
   for (const el of elements) {
@@ -245,6 +233,34 @@ function windowResized() {
 window.addEventListener('scroll', () => {
   redraw();
 });
+// Smooth scroll to bottom with easing when 'A' is pressed
+function keyPressed() {
+  if (key === 'a' || key === 'A') {
+    smoothScrollToBottom();
+  }
+}
+
+// Exponential ease-out (less steep)
+function smoothScrollToBottom() {
+  const start = window.scrollY;
+  const end = document.body.scrollHeight - window.innerHeight;
+  const duration = scrollToBottomDuration; // Uses variable
+  const startTime = performance.now();
+  // Less steep exponential ease-out
+  function easeOutExpo(t) {
+    return t === 1 ? 1 : 1 - Math.pow(2, -4 * t); // was -10, now -4
+  }
+  function animateScroll(now) {
+    const elapsed = now - startTime;
+    const t = min(1, elapsed / duration);
+    const eased = easeOutExpo(t);
+    window.scrollTo(0, start + (end - start) * eased);
+    if (t < 1) {
+      requestAnimationFrame(animateScroll);
+    }
+  }
+  requestAnimationFrame(animateScroll);
+}
 </script>
 </body>
 </html>
