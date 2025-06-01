@@ -238,6 +238,9 @@ function keyPressed() {
   if (key === 'a' || key === 'A') {
     smoothScrollToBottom();
   }
+  if (key === 'i' || key === 'I') {
+    saveCanvas('svg-grid', 'png');
+  }
 }
 
 // Exponential ease-out (less steep)
